@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Upload, Tag, Video, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft } from "lucide-react";
+import { Upload, Tag, Video, Users, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft, X } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
 const PROCESSOR_URL = import.meta.env.VITE_PROCESSOR_URL;
@@ -78,6 +78,7 @@ export default function App() {
   const [tab, setTab] = useState("upload");
   const [captions, setCaptions] = useState([]);
   const [videos, setVideos] = useState([]);
+  const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
 
@@ -92,17 +93,25 @@ export default function App() {
   const [capAlign, setCapAlign] = useState({ v: "center", h: "center" });
   const [savingCaption, setSavingCaption] = useState(false);
 
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [accDraft, setAccDraft] = useState({ tiktok_username: "", profile_url: "", description: "", status: "active", session_json: "", post_times: [] });
+  const [newTimeInput, setNewTimeInput] = useState("");
+  const [savingAccount, setSavingAccount] = useState(false);
+
   async function loadData() {
     setLoading(true);
     setErrorMsg(null);
-    const [capRes, vidRes] = await Promise.all([
+    const [capRes, vidRes, accRes] = await Promise.all([
       supabase.from("shop_captions").select("*").order("created_at", { ascending: false }),
       supabase.from("shop_videos").select("*").order("created_at", { ascending: false }).limit(50),
+      supabase.from("shop_accounts").select("*").order("created_at", { ascending: false }),
     ]);
     if (capRes.error) setErrorMsg(capRes.error.message);
     if (vidRes.error) setErrorMsg(vidRes.error.message);
+    if (accRes.error) setErrorMsg(accRes.error.message);
     setCaptions(capRes.data || []);
     setVideos(vidRes.data || []);
+    setAccounts(accRes.data || []);
     setLoading(false);
   }
 
@@ -191,6 +200,79 @@ export default function App() {
 
   async function deleteCaption(id) {
     const { error } = await supabase.from("shop_captions").delete().eq("id", id);
+    if (error) setErrorMsg(error.message);
+    else loadData();
+  }
+
+  function openNewAccount() {
+    setEditingAccount("new");
+    setAccDraft({ tiktok_username: "", profile_url: "", description: "", status: "active", session_json: "", post_times: [] });
+    setNewTimeInput("");
+  }
+
+  function openEditAccount(a) {
+    setEditingAccount(a.id);
+    setAccDraft({
+      tiktok_username: a.tiktok_username || "",
+      profile_url: a.profile_url || "",
+      description: a.description || "",
+      status: a.status || "active",
+      session_json: a.session_json ? JSON.stringify(a.session_json, null, 2) : "",
+      post_times: a.post_times || [],
+    });
+    setNewTimeInput("");
+  }
+
+  function addPostTime() {
+    if (!newTimeInput) return;
+    if (accDraft.post_times.includes(newTimeInput)) return;
+    setAccDraft((d) => ({ ...d, post_times: [...d.post_times, newTimeInput].sort() }));
+    setNewTimeInput("");
+  }
+
+  function removePostTime(time) {
+    setAccDraft((d) => ({ ...d, post_times: d.post_times.filter((t) => t !== time) }));
+  }
+
+  async function saveAccount() {
+    if (!accDraft.tiktok_username.trim()) return;
+    setSavingAccount(true);
+    setErrorMsg(null);
+    try {
+      let sessionParsed = null;
+      if (accDraft.session_json.trim()) {
+        try {
+          sessionParsed = JSON.parse(accDraft.session_json);
+        } catch {
+          throw new Error("Credencial JSON inválida — confira a formatação.");
+        }
+      }
+      const payload = {
+        tiktok_username: accDraft.tiktok_username.trim(),
+        profile_url: accDraft.profile_url.trim(),
+        description: accDraft.description.trim(),
+        status: accDraft.status,
+        session_json: sessionParsed,
+        post_times: accDraft.post_times,
+      };
+      if (editingAccount === "new") {
+        const { error } = await supabase.from("shop_accounts").insert(payload);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("shop_accounts").update(payload).eq("id", editingAccount);
+        if (error) throw error;
+      }
+      setEditingAccount(null);
+      loadData();
+    } catch (e) {
+      setErrorMsg(e.message);
+    } finally {
+      setSavingAccount(false);
+    }
+  }
+
+  async function deleteAccount(id) {
+    const { error } = await supabase.from("shop_accounts").delete().eq("id", id);
     if (error) setErrorMsg(error.message);
     else loadData();
   }
@@ -373,6 +455,149 @@ export default function App() {
               </div>
             )}
 
+            {tab === "accounts" && !editingAccount && (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                  <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Contas</h2>
+                  <button onClick={openNewAccount} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: C.accentText, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                    <Plus size={14} /> Nova
+                  </button>
+                </div>
+                <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 14px" }}>{accounts.length} cadastradas</p>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {accounts.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhuma conta cadastrada ainda.</p>}
+                  {accounts.map((a) => (
+                    <div key={a.id} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 10, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 600 }}>{a.tiktok_username}</span>
+                          <span style={{ fontSize: 9.5, fontWeight: 600, padding: "2px 6px", borderRadius: 10, background: a.status === "active" ? "#eaf0e9" : "#efeee9", color: a.status === "active" ? "#6b8a6f" : C.sub }}>
+                            {a.status === "active" ? "ativa" : "pausada"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: C.sub, marginTop: 2 }}>{a.description ? `"${a.description}"` : "sem descrição definida"}</div>
+                        <div style={{ fontSize: 10.5, color: C.sub, marginTop: 3 }}>{(a.post_times || []).length} horários · última programada: {a.last_scheduled_at ? new Date(a.last_scheduled_at).toLocaleDateString("pt-BR") : "-"}</div>
+                      </div>
+                      <button onClick={() => openEditAccount(a)} style={{ background: C.accentSoft, border: "none", borderRadius: 7, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Pencil size={12} color={C.accentText} />
+                      </button>
+                      <button onClick={() => deleteAccount(a.id)} style={{ background: "#f3e9e6", border: "none", borderRadius: 7, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Trash2 size={12} color="#a3766b" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab === "accounts" && editingAccount && (
+              <div>
+                <button onClick={() => setEditingAccount(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: C.sub, fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 14, padding: 0 }}>
+                  <ChevronLeft size={15} /> Voltar
+                </button>
+                <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 16px" }}>{editingAccount === "new" ? "Nova conta" : "Editar conta"}</h2>
+
+                {[
+                  { key: "tiktok_username", label: "Usuário TikTok", placeholder: "@usuario" },
+                  { key: "profile_url", label: "Link do perfil", placeholder: "https://tiktok.com/@usuario" },
+                ].map((f) => (
+                  <div key={f.key} style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{f.label}</div>
+                    <input
+                      value={accDraft[f.key]}
+                      onChange={(e) => setAccDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                      placeholder={f.placeholder}
+                      style={{ width: "100%", boxSizing: "border-box", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", color: C.text, fontSize: 12.5, outline: "none" }}
+                    />
+                  </div>
+                ))}
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Descrição do vídeo</div>
+                  <input
+                    value={accDraft.description}
+                    onChange={(e) => setAccDraft((d) => ({ ...d, description: e.target.value }))}
+                    placeholder="texto que vai na descrição de cada post"
+                    style={{ width: "100%", boxSizing: "border-box", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", color: C.text, fontSize: 12.5, outline: "none" }}
+                  />
+                  <div style={{ fontSize: 10.5, color: C.sub, marginTop: 5 }}>Usada em todo post feito por essa conta. Mudou aqui, muda em todos os próximos.</div>
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Credencial (JSON)</div>
+                  <textarea
+                    value={accDraft.session_json}
+                    onChange={(e) => setAccDraft((d) => ({ ...d, session_json: e.target.value }))}
+                    placeholder='{"cookies": [...], "token": "..."}'
+                    rows={8}
+                    style={{ width: "100%", boxSizing: "border-box", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", color: C.text, fontSize: 11.5, outline: "none", resize: "vertical", fontFamily: "ui-monospace, monospace", lineHeight: 1.5 }}
+                  />
+                  <div style={{ fontSize: 10.5, color: C.sub, marginTop: 5 }}>Cookies, tokens ou dados de sessão usados para postar sem login manual.</div>
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Horários de postagem ({accDraft.post_times.length})</div>
+                  <div style={{ fontSize: 10.5, color: C.sub, marginBottom: 10 }}>Um horário por postagem do dia. Se são 20 posts, adicione 20 horários.</div>
+
+                  {accDraft.post_times.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                      {accDraft.post_times.map((t) => (
+                        <div key={t} style={{ display: "flex", alignItems: "center", gap: 5, background: C.accentSoft, borderRadius: 8, padding: "5px 6px 5px 10px" }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>{t}</span>
+                          <button onClick={() => removePostTime(t)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 2 }}>
+                            <X size={11} color={C.accentText} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      type="time"
+                      value={newTimeInput}
+                      onChange={(e) => setNewTimeInput(e.target.value)}
+                      style={{ flex: 1, boxSizing: "border-box", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "9px 12px", color: C.text, fontSize: 12.5, outline: "none" }}
+                    />
+                    <button
+                      onClick={addPostTime}
+                      disabled={!newTimeInput}
+                      style={{ padding: "0 14px", borderRadius: 10, border: "none", background: !newTimeInput ? "#e7e4dd" : C.accent, color: !newTimeInput ? "#a8a498" : "#fff", fontSize: 12.5, fontWeight: 600, cursor: !newTimeInput ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      <Plus size={13} /> Add
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Status</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 22 }}>
+                  {["active", "paused"].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setAccDraft((d) => ({ ...d, status: s }))}
+                      style={{
+                        flex: 1, padding: "9px", borderRadius: 8, cursor: "pointer",
+                        border: accDraft.status === s ? `1.5px solid ${C.accent}` : `1px solid ${C.border}`,
+                        background: accDraft.status === s ? C.accentSoft : C.card,
+                        color: accDraft.status === s ? C.accentText : C.sub, fontSize: 12, fontWeight: 600,
+                      }}
+                    >
+                      {s === "active" ? "Ativa" : "Pausada"}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  onClick={saveAccount}
+                  disabled={!accDraft.tiktok_username.trim() || savingAccount}
+                  style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: !accDraft.tiktok_username.trim() || savingAccount ? "#e7e4dd" : C.accent, color: !accDraft.tiktok_username.trim() || savingAccount ? "#a8a498" : "#fff", fontSize: 13, fontWeight: 600, cursor: !accDraft.tiktok_username.trim() || savingAccount ? "not-allowed" : "pointer" }}
+                >
+                  {savingAccount ? "Salvando..." : "Salvar conta"}
+                </button>
+              </div>
+            )}
+
             {tab === "videos" && (
               <div>
                 <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Meus vídeos</h2>
@@ -421,6 +646,7 @@ export default function App() {
         {[
           { id: "upload", label: "Enviar", icon: Upload },
           { id: "captions", label: "Legendas", icon: Tag },
+          { id: "accounts", label: "Contas", icon: Users },
           { id: "videos", label: "Vídeos", icon: Video },
         ].map((t) => {
           const Icon = t.icon;
@@ -428,7 +654,7 @@ export default function App() {
           return (
             <button
               key={t.id}
-              onClick={() => { setTab(t.id); setEditingCaption(null); }}
+              onClick={() => { setTab(t.id); setEditingCaption(null); setEditingAccount(null); }}
               style={{ flex: 1, padding: "11px 0", background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, cursor: "pointer", color: active ? C.accentText : "#b5b1a6" }}
             >
               <Icon size={16} strokeWidth={active ? 2.2 : 1.8} />
