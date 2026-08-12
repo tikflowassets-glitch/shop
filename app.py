@@ -5,11 +5,19 @@ import subprocess
 import tempfile
 import uuid
 
-from flask import Flask, request, send_file, jsonify, after_this_request
+from flask import Flask, request, send_file, jsonify, after_this_request, abort
 
 app = Flask(__name__)
 
 FONT_BOLD = "/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf"
+
+# volume persistente montado no EasyPanel (sobrevive a restart/redeploy)
+DATA_DIR = "/data/shop-videos"
+RAW_DIR = os.path.join(DATA_DIR, "raw")
+PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
+MUSIC_DIR = os.path.join(DATA_DIR, "music")
+for d in (RAW_DIR, PROCESSED_DIR, MUSIC_DIR):
+    os.makedirs(d, exist_ok=True)
 
 
 def run(cmd):
@@ -25,19 +33,37 @@ def get_duration(path):
     return float(r.stdout.strip())
 
 
-def detect_beats(music_path, video_duration):
+def analyze_music(music_path):
+    """Roda a deteccao de batida uma unica vez e devolve dados serializaveis
+    (bpm, timestamps, duracao) para guardar no banco (shop_music_bank)."""
     import librosa
     import numpy as np
 
     y, sr = librosa.load(music_path, sr=None)
+    duration = float(librosa.get_duration(y=y, sr=sr))
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
     if len(beat_times) < 2:
-        # fallback: batida sintetica a 120bpm se a deteccao falhar
-        beat_times = np.arange(0, video_duration, 0.5)
+        beat_times = np.arange(0, duration, 0.5)
 
-    # extrapola mantendo o tempo constante, caso a deteccao pare antes do fim
+    tempo_val = float(tempo) if np.isscalar(tempo) else float(np.ravel(tempo)[0])
+    return {
+        "bpm": round(tempo_val, 1),
+        "duration": round(duration, 2),
+        "beat_timestamps": [round(float(t), 3) for t in beat_times],
+    }
+
+
+def extend_beats(beat_timestamps, video_duration):
+    """Extrapola os timestamps ja calculados para cobrir a duracao do video,
+    mantendo o espacamento medio (usado quando o video e mais longo que a musica)."""
+    import numpy as np
+
+    beat_times = np.array(beat_timestamps, dtype=float)
+    if len(beat_times) < 2:
+        return np.arange(0, video_duration, 0.5)
+
     diffs = np.diff(beat_times)
     avg_step = float(np.median(diffs)) if len(diffs) > 0 else 0.5
     extended = list(beat_times)
@@ -216,7 +242,8 @@ def process():
 
         video_duration = get_duration(video_path)
 
-        beat_times = detect_beats(music_path, video_duration)
+        music_info = analyze_music(music_path)
+        beat_times = extend_beats(music_info["beat_timestamps"], video_duration)
         segments = make_segments(beat_times, video_duration, beats_per_cut)
         n = len(segments)
         if n < 2:
@@ -248,6 +275,159 @@ def process():
     except Exception as e:
         shutil.rmtree(workdir, ignore_errors=True)
         return jsonify({"error": str(e)}), 500
+
+
+def _safe_join(base, *parts):
+    """Junta caminhos garantindo que o resultado nao escape do diretorio base
+    (protecao contra path traversal em /videos/<path>)."""
+    full = os.path.realpath(os.path.join(base, *parts))
+    if not full.startswith(os.path.realpath(base) + os.sep) and full != os.path.realpath(base):
+        abort(400, "caminho invalido")
+    return full
+
+
+@app.route('/upload-raw', methods=['POST'])
+def upload_raw():
+    """
+    Recebe o video bruto do Sergio (multipart/form-data, campo 'video') e
+    guarda no volume persistente. Devolve o path relativo para salvar na
+    tabela shop_videos (kind='raw').
+    """
+    if 'video' not in request.files:
+        return jsonify({"error": "envie o arquivo 'video' como multipart/form-data"}), 400
+
+    video_id = uuid.uuid4().hex
+    filename = f"{video_id}.mp4"
+    dest = os.path.join(RAW_DIR, filename)
+    request.files['video'].save(dest)
+
+    try:
+        duration = get_duration(dest)
+    except Exception:
+        duration = None
+
+    return jsonify({
+        "id": video_id,
+        "storage_path": f"raw/{filename}",
+        "duration": duration,
+    })
+
+
+@app.route('/upload-music', methods=['POST'])
+def upload_music():
+    """
+    Recebe uma musica nova (multipart/form-data, campo 'music'), roda a
+    deteccao de batida uma unica vez, guarda o arquivo no volume e devolve
+    bpm/timestamps/duracao para salvar na tabela shop_music_bank.
+    """
+    if 'music' not in request.files:
+        return jsonify({"error": "envie o arquivo 'music' como multipart/form-data"}), 400
+
+    music_id = uuid.uuid4().hex
+    filename = f"{music_id}.mp3"
+    dest = os.path.join(MUSIC_DIR, filename)
+    request.files['music'].save(dest)
+
+    try:
+        info = analyze_music(dest)
+    except Exception as e:
+        os.remove(dest)
+        return jsonify({"error": f"falha ao analisar audio: {e}"}), 422
+
+    return jsonify({
+        "id": music_id,
+        "storage_path": f"music/{filename}",
+        **info,
+    })
+
+
+@app.route('/process-stored', methods=['POST'])
+def process_stored():
+    """
+    Gera uma variacao processada a partir de arquivos JA salvos no volume
+    (nao envia binario, so referencias) - usado pela automacao em lote.
+
+    Espera JSON:
+      raw_video_path (ex: 'raw/abc123.mp4')
+      music_path (ex: 'music/def456.mp3')
+      beat_timestamps (lista, opcional - se enviado pula a deteccao de novo)
+      beats_per_cut, reorder_mode, num_blocks, color_grade,
+      table_text, center_text  (mesmos parametros de /process)
+
+    Retorna JSON com o storage_path do video processado (nao o binario) -
+    o arquivo fica salvo em processed/ e pode ser baixado via GET /videos/<path>.
+    """
+    data = request.get_json(silent=True) or {}
+    raw_video_path = data.get('raw_video_path')
+    music_path_rel = data.get('music_path')
+    if not raw_video_path or not music_path_rel:
+        return jsonify({"error": "informe raw_video_path e music_path"}), 400
+
+    video_path = _safe_join(DATA_DIR, raw_video_path)
+    music_path = _safe_join(DATA_DIR, music_path_rel)
+    if not os.path.isfile(video_path) or not os.path.isfile(music_path):
+        return jsonify({"error": "raw_video_path ou music_path nao encontrado no volume"}), 404
+
+    beats_per_cut = int(data.get('beats_per_cut', 2))
+    reorder_mode = data.get('reorder_mode', 'half')
+    num_blocks = int(data.get('num_blocks', 3))
+    color_grade = bool(data.get('color_grade', True))
+    table_text = data.get('table_text')
+    center_text = data.get('center_text')
+    beat_timestamps = data.get('beat_timestamps')
+
+    workdir = tempfile.mkdtemp(prefix=f"job_{uuid.uuid4().hex[:8]}_")
+    try:
+        video_duration = get_duration(video_path)
+
+        if beat_timestamps:
+            beat_times = extend_beats(beat_timestamps, video_duration)
+        else:
+            music_info = analyze_music(music_path)
+            beat_times = extend_beats(music_info["beat_timestamps"], video_duration)
+
+        segments = make_segments(beat_times, video_duration, beats_per_cut)
+        n = len(segments)
+        if n < 2:
+            return jsonify({"error": "poucos segmentos detectados"}), 422
+
+        seg_paths = cut_segments(video_path, segments, workdir)
+        order = build_reorder(n, reorder_mode, num_blocks)
+        video_no_audio = concat_segments(seg_paths, order, workdir)
+
+        total_dur = sum(e - s for s, e in segments)
+        current = mix_audio(video_no_audio, music_path, workdir, total_dur)
+
+        if color_grade:
+            current = apply_color_grade(current, workdir)
+        if table_text or center_text:
+            current = apply_text_overlays(current, workdir, table_text, center_text)
+
+        out_id = uuid.uuid4().hex
+        out_filename = f"{out_id}.mp4"
+        out_dest = os.path.join(PROCESSED_DIR, out_filename)
+        shutil.copy(current, out_dest)
+
+        return jsonify({
+            "id": out_id,
+            "storage_path": f"processed/{out_filename}",
+            "segments": n,
+            "duration": total_dur,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+@app.route('/videos/<path:relpath>', methods=['GET'])
+def get_video(relpath):
+    """Serve um arquivo do volume (raw/, processed/ ou music/) para
+    download, preview, ou upload posterior pro TikTok."""
+    full_path = _safe_join(DATA_DIR, relpath)
+    if not os.path.isfile(full_path):
+        abort(404)
+    return send_file(full_path)
 
 
 if __name__ == '__main__':
