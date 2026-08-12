@@ -1,0 +1,442 @@
+import { useState, useEffect, useMemo } from "react";
+import { Upload, Tag, Video, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft } from "lucide-react";
+import { supabase } from "./supabaseClient.js";
+
+const PROCESSOR_URL = import.meta.env.VITE_PROCESSOR_URL;
+
+const ALIGN_OPTIONS = [
+  { v: "top", h: "center" },
+  { v: "center", h: "center" },
+  { v: "center", h: "right" },
+  { v: "bottom", h: "center" },
+];
+
+function alignLabel(a) {
+  const vMap = { top: "cima", center: "centro", bottom: "baixo" };
+  const hMap = { left: "esquerda", center: "centro", right: "direita" };
+  return `${vMap[a.v]} · ${hMap[a.h]}`;
+}
+
+const statusMap = {
+  pending: { label: "Aguardando", color: "#8a8578", bg: "#efeee9" },
+  ready: { label: "Pronto", color: "#6b8a6f", bg: "#eaf0e9" },
+  posted: { label: "Postado", color: "#6b7f8a", bg: "#e9eef0" },
+  failed: { label: "Falhou", color: "#a3766b", bg: "#f3e9e6" },
+};
+
+const C = {
+  bg: "#faf9f6",
+  card: "#ffffff",
+  border: "#e7e4dd",
+  text: "#2e2c27",
+  sub: "#8a8578",
+  accent: "#8b978a",
+  accentSoft: "#eef1ec",
+  accentText: "#5a6b5c",
+};
+
+function PositionPicker({ value, onChange }) {
+  const PW = 108;
+  const PH = 192;
+  const posStyle = {
+    "top-center": { top: "22%", left: "50%", transform: "translate(-50%, -50%)" },
+    "center-center": { top: "50%", left: "50%", transform: "translate(-50%, -50%)" },
+    "center-right": { top: "50%", left: "76%", transform: "translate(-50%, -50%)" },
+    "bottom-center": { top: "76%", left: "50%", transform: "translate(-50%, -50%)" },
+  };
+
+  return (
+    <div>
+      <div style={{ position: "relative", width: PW, height: PH, borderRadius: 10, background: "#1c1c1a", overflow: "hidden", flexShrink: 0 }}>
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "10%", background: "rgba(255,255,255,0.12)" }} />
+        <div style={{ position: "absolute", top: "32%", bottom: "8%", right: 0, width: "17%", background: "rgba(255,255,255,0.12)" }} />
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "18%", background: "rgba(255,255,255,0.16)" }} />
+
+        {ALIGN_OPTIONS.map((opt, i) => {
+          const active = value.v === opt.v && value.h === opt.h;
+          const key = `${opt.v}-${opt.h}`;
+          return (
+            <button key={i} onClick={() => onChange(opt)} style={{ position: "absolute", ...posStyle[key] }}>
+              <div style={{
+                width: 16, height: 16, borderRadius: 5,
+                border: active ? "1.5px solid #d9d6cc" : "1.5px solid rgba(255,255,255,0.35)",
+                background: active ? "#d9d6cc" : "rgba(255,255,255,0.15)",
+                cursor: "pointer",
+              }} />
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 10, color: C.sub, marginTop: 8, lineHeight: 1.4, maxWidth: PW + 20 }}>
+        Áreas mais claras são onde o TikTok já coloca ícones e legenda. As posições disponíveis nunca encostam nelas.
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [tab, setTab] = useState("upload");
+  const [captions, setCaptions] = useState([]);
+  const [videos, setVideos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState(null);
+
+  const [selectedCaptions, setSelectedCaptions] = useState([]);
+  const [videoFile, setVideoFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadDone, setUploadDone] = useState(false);
+
+  const [captionSearch, setCaptionSearch] = useState("");
+  const [editingCaption, setEditingCaption] = useState(null);
+  const [capDraft, setCapDraft] = useState("");
+  const [capAlign, setCapAlign] = useState({ v: "center", h: "center" });
+  const [savingCaption, setSavingCaption] = useState(false);
+
+  async function loadData() {
+    setLoading(true);
+    setErrorMsg(null);
+    const [capRes, vidRes] = await Promise.all([
+      supabase.from("shop_captions").select("*").order("created_at", { ascending: false }),
+      supabase.from("shop_videos").select("*").order("created_at", { ascending: false }).limit(50),
+    ]);
+    if (capRes.error) setErrorMsg(capRes.error.message);
+    if (vidRes.error) setErrorMsg(vidRes.error.message);
+    setCaptions(capRes.data || []);
+    setVideos(vidRes.data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const filteredCaptions = useMemo(() => {
+    if (!captionSearch.trim()) return captions;
+    return captions.filter((c) => c.caption_text.toLowerCase().includes(captionSearch.toLowerCase()));
+  }, [captions, captionSearch]);
+
+  function toggleCaption(id) {
+    setSelectedCaptions((prev) => {
+      if (prev.includes(id)) return prev.filter((c) => c !== id);
+      if (prev.length >= 3) return prev;
+      return [...prev, id];
+    });
+  }
+
+  async function handleSend() {
+    if (!videoFile || selectedCaptions.length === 0 || !PROCESSOR_URL) return;
+    setUploading(true);
+    setErrorMsg(null);
+    try {
+      const form = new FormData();
+      form.append("video", videoFile);
+      const res = await fetch(`${PROCESSOR_URL}/upload-raw`, { method: "POST", body: form });
+      if (!res.ok) throw new Error(`Falha no envio (${res.status})`);
+      const data = await res.json();
+
+      const { error } = await supabase.from("shop_videos").insert({
+        kind: "raw",
+        storage_path: data.storage_path,
+        caption_ids: selectedCaptions,
+        status: "pending",
+        uploaded_by: "sergio",
+        max_uses: 4,
+      });
+      if (error) throw error;
+
+      setUploadDone(true);
+      setVideoFile(null);
+      setSelectedCaptions([]);
+      loadData();
+      setTimeout(() => setUploadDone(false), 1800);
+    } catch (e) {
+      setErrorMsg(e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function openNewCaption() {
+    setEditingCaption("new");
+    setCapDraft("");
+    setCapAlign({ v: "center", h: "center" });
+  }
+
+  function openEditCaption(c) {
+    setEditingCaption(c.id);
+    setCapDraft(c.caption_text);
+    setCapAlign(c.align || { v: "center", h: "center" });
+  }
+
+  async function saveCaption() {
+    if (!capDraft.trim()) return;
+    setSavingCaption(true);
+    setErrorMsg(null);
+    try {
+      if (editingCaption === "new") {
+        const { error } = await supabase.from("shop_captions").insert({ caption_text: capDraft.trim(), align: capAlign });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("shop_captions").update({ caption_text: capDraft.trim(), align: capAlign }).eq("id", editingCaption);
+        if (error) throw error;
+      }
+      setEditingCaption(null);
+      loadData();
+    } catch (e) {
+      setErrorMsg(e.message);
+    } finally {
+      setSavingCaption(false);
+    }
+  }
+
+  async function deleteCaption(id) {
+    const { error } = await supabase.from("shop_captions").delete().eq("id", id);
+    if (error) setErrorMsg(error.message);
+    else loadData();
+  }
+
+  return (
+    <div style={{ maxWidth: 420, margin: "0 auto", fontFamily: "system-ui, sans-serif", background: C.bg, minHeight: "100vh", display: "flex", flexDirection: "column", color: C.text }}>
+      <div style={{ padding: "18px 20px 14px", borderBottom: `1px solid ${C.border}`, background: C.card, position: "sticky", top: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 7, background: C.accentSoft, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Film size={14} color={C.accentText} strokeWidth={2} />
+          </div>
+          <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.01em" }}>TikFlow Shop</span>
+        </div>
+      </div>
+
+      {errorMsg && (
+        <div style={{ margin: "12px 20px 0", padding: "10px 12px", borderRadius: 8, background: "#f3e9e6", color: "#a3766b", fontSize: 12 }}>
+          {errorMsg}
+        </div>
+      )}
+      {!PROCESSOR_URL && (
+        <div style={{ margin: "12px 20px 0", padding: "10px 12px", borderRadius: 8, background: "#faeeda", color: "#854f0b", fontSize: 12 }}>
+          VITE_PROCESSOR_URL não configurada — envio de vídeo desativado até configurar.
+        </div>
+      )}
+
+      <div style={{ flex: 1, padding: 20 }}>
+        {loading ? (
+          <p style={{ fontSize: 13, color: C.sub }}>Carregando...</p>
+        ) : (
+          <>
+            {tab === "upload" && (
+              <div>
+                <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Enviar vídeo</h2>
+                <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 18px" }}>Cada vídeo bruto gera 4 variações automaticamente.</p>
+
+                <input type="file" accept="video/*" onChange={(e) => setVideoFile(e.target.files?.[0] || null)} style={{ display: "none" }} id="fileInput" />
+                <label
+                  htmlFor="fileInput"
+                  style={{
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                    gap: 6, padding: "24px 16px", borderRadius: 12,
+                    border: videoFile ? `1.5px solid ${C.accent}` : `1.5px dashed ${C.border}`,
+                    background: videoFile ? C.accentSoft : "transparent", cursor: "pointer", marginBottom: 18,
+                  }}
+                >
+                  <Upload size={19} color={videoFile ? C.accentText : "#b5b1a6"} />
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: videoFile ? C.accentText : C.sub, textAlign: "center", wordBreak: "break-all" }}>
+                    {videoFile ? videoFile.name : "Toque para escolher o vídeo"}
+                  </span>
+                </label>
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Legendas ({selectedCaptions.length}/3)</span>
+                </div>
+                <div style={{ position: "relative", marginBottom: 10 }}>
+                  <Search size={13} color={C.sub} style={{ position: "absolute", left: 10, top: 10 }} />
+                  <input
+                    value={captionSearch}
+                    onChange={(e) => setCaptionSearch(e.target.value)}
+                    placeholder="Buscar legenda..."
+                    style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 30px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, fontSize: 12.5, outline: "none", color: C.text }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 22, maxHeight: 220, overflowY: "auto" }}>
+                  {filteredCaptions.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhuma legenda cadastrada ainda.</p>}
+                  {filteredCaptions.map((c) => {
+                    const active = selectedCaptions.includes(c.id);
+                    const disabled = !active && selectedCaptions.length >= 3;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => toggleCaption(c.id)}
+                        disabled={disabled}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10, textAlign: "left",
+                          padding: "10px 12px", borderRadius: 10,
+                          border: active ? `1.5px solid ${C.accent}` : `1px solid ${C.border}`,
+                          background: active ? C.accentSoft : C.card,
+                          opacity: disabled ? 0.4 : 1, cursor: disabled ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        <div style={{ width: 16, height: 16, borderRadius: 5, flexShrink: 0, border: active ? "none" : `1.5px solid ${C.border}`, background: active ? C.accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {active && <Check size={10} color="#fff" strokeWidth={3} />}
+                        </div>
+                        <div style={{ fontSize: 12, color: C.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {c.caption_text.split("\n")[0]}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={handleSend}
+                  disabled={!videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL}
+                  style={{
+                    width: "100%", padding: "12px", borderRadius: 10, border: "none",
+                    background: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
+                    color: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#a8a498" : "#fff",
+                    fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {uploading ? "Enviando..." : uploadDone ? "Enviado" : "Enviar vídeo"}
+                </button>
+              </div>
+            )}
+
+            {tab === "captions" && !editingCaption && (
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
+                  <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Legendas</h2>
+                  <button onClick={openNewCaption} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: C.accentText, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                    <Plus size={14} /> Nova
+                  </button>
+                </div>
+                <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 14px" }}>{captions.length} cadastradas</p>
+
+                <div style={{ position: "relative", marginBottom: 14 }}>
+                  <Search size={13} color={C.sub} style={{ position: "absolute", left: 10, top: 10 }} />
+                  <input
+                    value={captionSearch}
+                    onChange={(e) => setCaptionSearch(e.target.value)}
+                    placeholder="Buscar legenda..."
+                    style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 30px", borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, fontSize: 12.5, outline: "none", color: C.text }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {filteredCaptions.map((c) => (
+                    <div key={c.id} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 10, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: C.text, whiteSpace: "pre-line", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{c.caption_text}</div>
+                        <div style={{ fontSize: 10.5, color: C.sub, marginTop: 4 }}>{c.align ? alignLabel(c.align) : "centro · centro"}</div>
+                      </div>
+                      <button onClick={() => openEditCaption(c)} style={{ background: C.accentSoft, border: "none", borderRadius: 7, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Pencil size={12} color={C.accentText} />
+                      </button>
+                      <button onClick={() => deleteCaption(c.id)} style={{ background: "#f3e9e6", border: "none", borderRadius: 7, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Trash2 size={12} color="#a3766b" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tab === "captions" && editingCaption && (
+              <div>
+                <button onClick={() => setEditingCaption(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: C.sub, fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 14, padding: 0 }}>
+                  <ChevronLeft size={15} /> Voltar
+                </button>
+                <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 16px" }}>{editingCaption === "new" ? "Nova legenda" : "Editar legenda"}</h2>
+
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Texto</div>
+                <textarea
+                  value={capDraft}
+                  onChange={(e) => setCapDraft(e.target.value)}
+                  rows={5}
+                  placeholder="Texto que aparece sobreposto no vídeo"
+                  style={{ width: "100%", boxSizing: "border-box", background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "10px 12px", color: C.text, fontSize: 12.5, outline: "none", resize: "vertical", fontFamily: "inherit", marginBottom: 18 }}
+                />
+
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>Posição na tela</span>
+                  <span style={{ fontSize: 11, color: C.accentText, fontWeight: 600 }}>{alignLabel(capAlign)}</span>
+                </div>
+                <div style={{ marginBottom: 22 }}>
+                  <PositionPicker value={capAlign} onChange={setCapAlign} />
+                </div>
+
+                <button
+                  onClick={saveCaption}
+                  disabled={!capDraft.trim() || savingCaption}
+                  style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: !capDraft.trim() || savingCaption ? "#e7e4dd" : C.accent, color: !capDraft.trim() || savingCaption ? "#a8a498" : "#fff", fontSize: 13, fontWeight: 600, cursor: !capDraft.trim() || savingCaption ? "not-allowed" : "pointer" }}
+                >
+                  {savingCaption ? "Salvando..." : "Salvar legenda"}
+                </button>
+              </div>
+            )}
+
+            {tab === "videos" && (
+              <div>
+                <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Meus vídeos</h2>
+                <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 16px" }}>Resumo de tudo que já foi processado.</p>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }}>
+                  {[
+                    { label: "Prontos p/ postar", count: videos.filter((v) => v.status === "ready" || v.status === "pending").length, color: "#6b8a6f", bg: "#eaf0e9" },
+                    { label: "Postados", count: videos.filter((v) => v.status === "posted").length, color: "#6b7f8a", bg: "#e9eef0" },
+                    { label: "Falharam", count: videos.filter((v) => v.status === "failed").length, color: "#a3766b", bg: "#f3e9e6" },
+                  ].map((s) => (
+                    <div key={s.label} style={{ background: s.bg, borderRadius: 10, padding: "10px 10px" }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.count}</div>
+                      <div style={{ fontSize: 10, color: s.color, marginTop: 2, lineHeight: 1.3 }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {videos.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhum vídeo enviado ainda.</p>}
+                  {videos.map((v) => {
+                    const s = statusMap[v.status] || statusMap.pending;
+                    return (
+                      <div key={v.id} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Video size={14} color={C.accentText} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.storage_path?.split("/").pop() || v.id}</div>
+                          <div style={{ fontSize: 10.5, color: C.sub }}>{v.times_used || 0}/{v.max_uses || 4} variações · {new Date(v.created_at).toLocaleDateString("pt-BR")}</div>
+                        </div>
+                        <div style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: s.bg, color: s.color, flexShrink: 0 }}>
+                          {s.label}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div style={{ display: "flex", borderTop: `1px solid ${C.border}`, background: C.card, position: "sticky", bottom: 0 }}>
+        {[
+          { id: "upload", label: "Enviar", icon: Upload },
+          { id: "captions", label: "Legendas", icon: Tag },
+          { id: "videos", label: "Vídeos", icon: Video },
+        ].map((t) => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => { setTab(t.id); setEditingCaption(null); }}
+              style={{ flex: 1, padding: "11px 0", background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, cursor: "pointer", color: active ? C.accentText : "#b5b1a6" }}
+            >
+              <Icon size={16} strokeWidth={active ? 2.2 : 1.8} />
+              <span style={{ fontSize: 9.5, fontWeight: active ? 700 : 500 }}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
