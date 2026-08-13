@@ -166,33 +166,43 @@ def apply_color_grade(input_path, workdir):
     return out
 
 
-def apply_text_overlays(input_path, workdir, table_text, center_text):
-    filters = []
-    text_file = None
-
-    if table_text:
-        text_file = os.path.join(workdir, 'overlay_table.txt')
-        with open(text_file, 'w') as f:
-            f.write(table_text)
-        filters.append(
-            f"drawtext=fontfile='{FONT_BOLD}':textfile='{text_file}':"
-            f"fontcolor=white:fontsize=14:line_spacing=3:bordercolor=black:borderw=2:"
-            f"x=w-tw-15:y=h-th-15"
-        )
-
-    if center_text:
-        safe_text = center_text.replace("'", "\\'").replace(':', '\\:')
-        filters.append(
-            f"drawtext=fontfile='{FONT_BOLD}':text='{safe_text}':"
-            f"fontcolor=white:fontsize=40:bordercolor=black:borderw=3:"
-            f"x=(w-tw)/2:y=(h-th)/2"
-        )
-
-    if not filters:
+def apply_caption(input_path, workdir, caption_text, align):
+    """
+    Aplica uma legenda (texto + posicao) seguindo as 4 posicoes seguras
+    definidas no seletor visual do app: top-center, center-center,
+    center-right (com respiro da borda) e bottom-center.
+    align = {"v": "top"|"center"|"bottom", "h": "center"|"right"}
+    """
+    if not caption_text:
         return input_path
 
+    v = (align or {}).get('v', 'center')
+    h = (align or {}).get('h', 'center')
+
+    x_map = {
+        'center': '(w-tw)/2',
+        'right': '(w*0.76)-(tw/2)',
+    }
+    y_map = {
+        'top': 'h*0.12-th/2',
+        'center': '(h-th)/2',
+        'bottom': 'h*0.80-th/2',
+    }
+    x_expr = x_map.get(h, '(w-tw)/2')
+    y_expr = y_map.get(v, '(h-th)/2')
+
+    text_file = os.path.join(workdir, 'caption.txt')
+    with open(text_file, 'w') as f:
+        f.write(caption_text)
+
+    filt = (
+        f"drawtext=fontfile='{FONT_BOLD}':textfile='{text_file}':"
+        f"fontcolor=white:fontsize=22:line_spacing=6:bordercolor=black:borderw=2:"
+        f"x={x_expr}:y={y_expr}"
+    )
+
     out = os.path.join(workdir, 'texted.mp4')
-    run(['ffmpeg', '-y', '-i', input_path, '-vf', ",".join(filters), '-c:a', 'copy', out])
+    run(['ffmpeg', '-y', '-i', input_path, '-vf', filt, '-c:a', 'copy', out])
     return out
 
 
@@ -212,8 +222,8 @@ def process():
           reorder_mode ('half' | 'blocks' | 'sequential', default 'half')
           num_blocks (int, default 3, usado só se reorder_mode='blocks')
           color_grade (bool, default true)
-          table_text (string multilinha, opcional - tabela tipo tamanhos)
-          center_text (string, opcional - texto tipo "COMPRE AGORA")
+          caption_text (string, opcional - texto da legenda)
+          caption_align (obj {"v":"top|center|bottom","h":"center|right"}, opcional)
     Retorna o video processado (mp4) como resposta binaria.
     """
     if 'video' not in request.files or 'music' not in request.files:
@@ -230,8 +240,8 @@ def process():
     reorder_mode = params.get('reorder_mode', 'half')
     num_blocks = int(params.get('num_blocks', 3))
     color_grade = bool(params.get('color_grade', True))
-    table_text = params.get('table_text')
-    center_text = params.get('center_text')
+    caption_text = params.get('caption_text')
+    caption_align = params.get('caption_align')
 
     workdir = tempfile.mkdtemp(prefix=f"job_{uuid.uuid4().hex[:8]}_")
     try:
@@ -259,8 +269,8 @@ def process():
         if color_grade:
             current = apply_color_grade(current, workdir)
 
-        if table_text or center_text:
-            current = apply_text_overlays(current, workdir, table_text, center_text)
+        if caption_text:
+            current = apply_caption(current, workdir, caption_text, caption_align)
 
         final_out = os.path.join(workdir, 'final.mp4')
         shutil.copy(current, final_out)
@@ -352,7 +362,7 @@ def process_stored():
       music_path (ex: 'music/def456.mp3')
       beat_timestamps (lista, opcional - se enviado pula a deteccao de novo)
       beats_per_cut, reorder_mode, num_blocks, color_grade,
-      table_text, center_text  (mesmos parametros de /process)
+      caption_text, caption_align  (mesmos parametros de /process)
 
     Retorna JSON com o storage_path do video processado (nao o binario) -
     o arquivo fica salvo em processed/ e pode ser baixado via GET /videos/<path>.
@@ -372,8 +382,8 @@ def process_stored():
     reorder_mode = data.get('reorder_mode', 'half')
     num_blocks = int(data.get('num_blocks', 3))
     color_grade = bool(data.get('color_grade', True))
-    table_text = data.get('table_text')
-    center_text = data.get('center_text')
+    caption_text = data.get('caption_text')
+    caption_align = data.get('caption_align')
     beat_timestamps = data.get('beat_timestamps')
 
     workdir = tempfile.mkdtemp(prefix=f"job_{uuid.uuid4().hex[:8]}_")
@@ -400,8 +410,8 @@ def process_stored():
 
         if color_grade:
             current = apply_color_grade(current, workdir)
-        if table_text or center_text:
-            current = apply_text_overlays(current, workdir, table_text, center_text)
+        if caption_text:
+            current = apply_caption(current, workdir, caption_text, caption_align)
 
         out_id = uuid.uuid4().hex
         out_filename = f"{out_id}.mp4"
