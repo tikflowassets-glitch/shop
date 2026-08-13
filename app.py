@@ -6,8 +6,10 @@ import tempfile
 import uuid
 
 from flask import Flask, request, send_file, jsonify, after_this_request, abort
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)  # permite chamadas do frontend (Vercel) para este servidor
 
 FONT_BOLD = "/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf"
 
