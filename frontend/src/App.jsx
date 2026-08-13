@@ -211,28 +211,46 @@ export default function App() {
     setNewTimeInput("");
   }
 
-  function openEditAccount(a) {
+  async function openEditAccount(a) {
     setEditingAccount(a.id);
+    setNewTimeInput("");
+    // busca a versao mais recente direto do banco, nunca confia no estado local
+    // (evita reenviar uma credencial desatualizada por engano)
+    const { data, error } = await supabase.from("shop_accounts").select("*").eq("id", a.id).single();
+    const fresh = error ? a : data;
     setAccDraft({
-      tiktok_username: a.tiktok_username || "",
-      profile_url: a.profile_url || "",
-      description: a.description || "",
-      status: a.status || "active",
-      session_json: a.session_json ? JSON.stringify(a.session_json, null, 2) : "",
-      post_times: a.post_times || [],
+      tiktok_username: fresh.tiktok_username || "",
+      profile_url: fresh.profile_url || "",
+      description: fresh.description || "",
+      status: fresh.status || "active",
+      session_json: fresh.session_json ? JSON.stringify(fresh.session_json, null, 2) : "",
+      post_times: fresh.post_times || [],
     });
-    setNewTimeInput("");
   }
 
-  function addPostTime() {
-    if (!newTimeInput) return;
+  async function addPostTime() {
+    if (!newTimeInput || editingAccount === "new") {
+      // conta nova ainda nao existe no banco - so mexe no estado local, salva junto no "Salvar conta"
+      if (newTimeInput && !accDraft.post_times.includes(newTimeInput)) {
+        setAccDraft((d) => ({ ...d, post_times: [...d.post_times, newTimeInput].sort() }));
+      }
+      setNewTimeInput("");
+      return;
+    }
     if (accDraft.post_times.includes(newTimeInput)) return;
-    setAccDraft((d) => ({ ...d, post_times: [...d.post_times, newTimeInput].sort() }));
+    const updated = [...accDraft.post_times, newTimeInput].sort();
+    setAccDraft((d) => ({ ...d, post_times: updated }));
     setNewTimeInput("");
+    const { error } = await supabase.from("shop_accounts").update({ post_times: updated }).eq("id", editingAccount);
+    if (error) setErrorMsg(error.message);
   }
 
-  function removePostTime(time) {
-    setAccDraft((d) => ({ ...d, post_times: d.post_times.filter((t) => t !== time) }));
+  async function removePostTime(time) {
+    const updated = accDraft.post_times.filter((t) => t !== time);
+    setAccDraft((d) => ({ ...d, post_times: updated }));
+    if (editingAccount === "new") return;
+    const { error } = await supabase.from("shop_accounts").update({ post_times: updated }).eq("id", editingAccount);
+    if (error) setErrorMsg(error.message);
   }
 
   async function saveAccount() {
