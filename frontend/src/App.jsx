@@ -226,7 +226,9 @@ export default function App() {
       profile_url: fresh.profile_url || "",
       description: fresh.description || "",
       status: fresh.status || "active",
-      session_json: fresh.session_json ? JSON.stringify(fresh.session_json, null, 2) : "",
+      session_json: fresh.session_json
+        ? (typeof fresh.session_json === "string" ? fresh.session_json : JSON.stringify(fresh.session_json, null, 2))
+        : "",
       post_times: fresh.post_times || [],
     });
   }
@@ -261,20 +263,15 @@ export default function App() {
     setSavingAccount(true);
     setErrorMsg(null);
     try {
-      let sessionParsed = null;
-      if (accDraft.session_json.trim()) {
-        try {
-          sessionParsed = JSON.parse(accDraft.session_json);
-        } catch {
-          throw new Error("Credencial JSON inválida — confira a formatação.");
-        }
-      }
+      // IMPORTANTE: nao faz JSON.parse aqui. O node do TikTok espera uma STRING
+      // cujo conteudo e o texto JSON (nao o objeto ja interpretado). Salva exatamente
+      // o texto que esta na caixa, sem converter - preserva o formato entre edicoes.
       const payload = {
         tiktok_username: accDraft.tiktok_username.trim(),
         profile_url: accDraft.profile_url.trim(),
         description: accDraft.description.trim(),
         status: accDraft.status,
-        session_json: sessionParsed,
+        session_json: accDraft.session_json,
         post_times: accDraft.post_times,
       };
       if (editingAccount === "new") {
