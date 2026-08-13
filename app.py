@@ -353,6 +353,17 @@ def upload_music():
     })
 
 
+def trim_video(video_path, workdir, start_offset, max_duration):
+    """Corta o video bruto para o trecho [start_offset, start_offset+max_duration]
+    antes de rodar o pipeline de batida - usado para limitar a duracao final
+    e permitir que variacoes diferentes comecem em pontos diferentes do video."""
+    out = os.path.join(workdir, 'trimmed_input.mp4')
+    run(['ffmpeg', '-y', '-ss', str(start_offset), '-i', video_path, '-t', str(max_duration),
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+         '-avoid_negative_ts', 'make_zero', out])
+    return out
+
+
 @app.route('/process-stored', methods=['POST'])
 def process_stored():
     """
@@ -387,9 +398,16 @@ def process_stored():
     caption_text = data.get('caption_text')
     caption_align = data.get('caption_align')
     beat_timestamps = data.get('beat_timestamps')
+    start_offset = float(data.get('start_offset', 0))
+    max_duration = data.get('max_duration')
+    max_duration = float(max_duration) if max_duration else None
 
     workdir = tempfile.mkdtemp(prefix=f"job_{uuid.uuid4().hex[:8]}_")
     try:
+        if start_offset > 0 or max_duration:
+            effective_duration = max_duration if max_duration else get_duration(video_path) - start_offset
+            video_path = trim_video(video_path, workdir, start_offset, effective_duration)
+
         video_duration = get_duration(video_path)
 
         if beat_timestamps:
