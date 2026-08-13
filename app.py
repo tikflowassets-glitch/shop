@@ -460,5 +460,17 @@ def get_video(relpath):
     return send_file(full_path)
 
 
+@app.route('/videos/<path:relpath>', methods=['DELETE'])
+def delete_video(relpath):
+    """Remove um arquivo do volume (usado pela automacao de postagem depois
+    que um video processado ja foi postado com sucesso - o registro no
+    Supabase continua existindo, so o arquivo fisico e apagado)."""
+    full_path = _safe_join(DATA_DIR, relpath)
+    if not os.path.isfile(full_path):
+        return jsonify({"error": "arquivo nao encontrado"}), 404
+    os.remove(full_path)
+    return jsonify({"status": "deleted", "path": relpath})
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
