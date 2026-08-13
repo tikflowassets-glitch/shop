@@ -146,6 +146,7 @@ export default function App() {
       const { error } = await supabase.from("shop_videos").insert({
         kind: "raw",
         storage_path: data.storage_path,
+        duration: data.duration,
         caption_ids: selectedCaptions,
         status: "pending",
         uploaded_by: "sergio",
