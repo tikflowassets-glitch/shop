@@ -86,6 +86,7 @@ export default function App() {
   const [videoFile, setVideoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
+  const [successMsg, setSuccessMsg] = useState(null);
 
   const [captionSearch, setCaptionSearch] = useState("");
   const [editingCaption, setEditingCaption] = useState(null);
@@ -155,10 +156,12 @@ export default function App() {
       if (error) throw error;
 
       setUploadDone(true);
+      setSuccessMsg(`Vídeo "${videoFile.name}" enviado com sucesso.`);
       setVideoFile(null);
       setSelectedCaptions([]);
       loadData();
       setTimeout(() => setUploadDone(false), 1800);
+      setTimeout(() => setSuccessMsg(null), 6000);
     } catch (e) {
       setErrorMsg(e.message);
     } finally {
@@ -307,6 +310,11 @@ export default function App() {
         </div>
       </div>
 
+      {successMsg && (
+        <div style={{ margin: "12px 20px 0", padding: "10px 12px", borderRadius: 8, background: "#eaf0e9", color: "#6b8a6f", fontSize: 12, fontWeight: 600 }}>
+          ✓ {successMsg}
+        </div>
+      )}
       {errorMsg && (
         <div style={{ margin: "12px 20px 0", padding: "10px 12px", borderRadius: 8, background: "#f3e9e6", color: "#a3766b", fontSize: 12 }}>
           {errorMsg}
