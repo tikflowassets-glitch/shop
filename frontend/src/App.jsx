@@ -217,7 +217,6 @@ export default function App() {
       setSelectedCaptions([]);
       loadData();
       setTimeout(() => setUploadDone(false), 1800);
-      setTimeout(() => setSuccessMsg(null), 6000);
     } catch (e) {
       setErrorMsg(e.message);
       setProcessingProgress(null);
@@ -366,8 +365,11 @@ export default function App() {
       </div>
 
       {successMsg && (
-        <div style={{ margin: "12px 20px 0", padding: "10px 12px", borderRadius: 8, background: "#eaf0e9", color: "#6b8a6f", fontSize: 12, fontWeight: 600 }}>
-          ✓ {successMsg}
+        <div style={{ margin: "12px 20px 0", padding: "10px 12px", borderRadius: 8, background: "#eaf0e9", color: "#6b8a6f", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <span>✓ {successMsg}</span>
+          <button onClick={() => setSuccessMsg(null)} style={{ background: "none", border: "none", cursor: "pointer", display: "flex", padding: 2, flexShrink: 0 }}>
+            <X size={14} color="#6b8a6f" />
+          </button>
         </div>
       )}
       {errorMsg && (
