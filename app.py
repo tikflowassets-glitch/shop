@@ -323,6 +323,11 @@ def upload_raw():
     Recebe o video bruto do Sergio (multipart/form-data, campo 'video') e
     guarda no volume persistente. Devolve o path relativo para salvar na
     tabela shop_videos (kind='raw').
+
+    Videos grandes (ex: gravados em 4K/alta bitrate) sao comprimidos
+    automaticamente apos o recebimento - reduz espaco em disco e acelera
+    o pipeline de corte, ja que o resultado final e sempre um clipe curto
+    (8-13s) e nao precisa da resolucao/bitrate original do celular.
     """
     if 'video' not in request.files:
         return jsonify({"error": "envie o arquivo 'video' como multipart/form-data"}), 400
@@ -331,6 +336,23 @@ def upload_raw():
     filename = f"{video_id}.mp4"
     dest = os.path.join(RAW_DIR, filename)
     request.files['video'].save(dest)
+
+    # comprime se o arquivo passar de ~80MB (video de celular normalmente
+    # nao precisa de mais que isso para um clipe curto de produto)
+    COMPRESS_THRESHOLD_BYTES = 80 * 1024 * 1024
+    try:
+        original_size = os.path.getsize(dest)
+        if original_size > COMPRESS_THRESHOLD_BYTES:
+            compressed = os.path.join(RAW_DIR, f"{video_id}_compressed.mp4")
+            run(['ffmpeg', '-y', '-i', dest,
+                 '-vf', "scale='min(1080,iw)':-2",
+                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+                 '-c:a', 'aac', '-b:a', '128k',
+                 compressed])
+            os.replace(compressed, dest)
+    except Exception:
+        # se a compressao falhar por qualquer motivo, segue com o arquivo original
+        pass
 
     try:
         duration = get_duration(dest)
