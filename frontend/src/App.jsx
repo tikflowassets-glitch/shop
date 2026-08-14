@@ -179,6 +179,23 @@ export default function App() {
         return arr[Math.floor(Math.random() * arr.length)];
       }
 
+      function shuffle(arr) {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+      }
+
+      // monta a atribuicao de legendas sem repetir enquanto houver opcao diferente disponivel:
+      // embaralha o pool e vai ciclando - só repete depois de esgotar todas as distintas
+      const captionPool = eligibleCaptions.length ? eligibleCaptions : captions;
+      const captionAssignment = [];
+      while (captionAssignment.length < TOTAL_VARIATIONS && captionPool.length > 0) {
+        captionAssignment.push(...shuffle(captionPool));
+      }
+
       async function fetchWithRetry(url, options, retries = 3, delayMs = 2000, onRetry) {
         for (let attempt = 1; attempt <= retries; attempt++) {
           try {
@@ -196,7 +213,7 @@ export default function App() {
         setProcessingProgress({ current: i + 1, total: TOTAL_VARIATIONS });
 
         const pickedMusic = pickRandom(music);
-        const pickedCaption = pickRandom(eligibleCaptions.length ? eligibleCaptions : captions);
+        const pickedCaption = captionAssignment[i] || null;
         const thisDuration = 8 + Math.random() * 5; // 8-13s
         const maxStart = Math.max(0, rawDuration - thisDuration);
         const startOffset = Math.random() * maxStart;
