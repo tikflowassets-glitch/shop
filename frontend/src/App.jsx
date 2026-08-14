@@ -87,6 +87,7 @@ export default function App() {
   const [videoFile, setVideoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
+  const [finalizing, setFinalizing] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   // (geracao das variacoes agora roda via workflow do n8n, nao mais no navegador)
@@ -143,6 +144,7 @@ export default function App() {
     if (!videoFile || selectedCaptions.length === 0 || !PROCESSOR_URL) return;
     setUploading(true);
     setUploadPercent(0);
+    setFinalizing(false);
     setErrorMsg(null);
     try {
       const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB por pedaço
@@ -176,6 +178,7 @@ export default function App() {
         setUploadPercent(Math.round((bytesSent / videoFile.size) * 100));
       }
 
+      setFinalizing(true);
       const completeRes = await fetch(`${PROCESSOR_URL}/upload-complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -207,6 +210,7 @@ export default function App() {
       setProcessingProgress(null);
     } finally {
       setUploading(false);
+      setFinalizing(false);
     }
   }
 
@@ -436,7 +440,7 @@ export default function App() {
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
-                        Enviando vídeo... {uploadPercent}%
+                        {finalizing ? "Finalizando no servidor (juntando e comprimindo)..." : `Enviando vídeo... ${uploadPercent}%`}
                       </span>
                     </div>
                     <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
@@ -458,7 +462,7 @@ export default function App() {
                     fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading ? "not-allowed" : "pointer",
                   }}
                 >
-                  {uploading ? `Enviando... ${uploadPercent}%` : uploadDone ? "Enviado!" : "Enviar vídeo"}
+                  {finalizing ? "Finalizando..." : uploading ? `Enviando... ${uploadPercent}%` : uploadDone ? "Enviado!" : "Enviar vídeo"}
                 </button>
               </div>
             )}
