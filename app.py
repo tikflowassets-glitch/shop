@@ -317,28 +317,9 @@ def _safe_join(base, *parts):
     return full
 
 
-@app.route('/upload-raw', methods=['POST'])
-def upload_raw():
-    """
-    Recebe o video bruto do Sergio (multipart/form-data, campo 'video') e
-    guarda no volume persistente. Devolve o path relativo para salvar na
-    tabela shop_videos (kind='raw').
-
-    Videos grandes (ex: gravados em 4K/alta bitrate) sao comprimidos
-    automaticamente apos o recebimento - reduz espaco em disco e acelera
-    o pipeline de corte, ja que o resultado final e sempre um clipe curto
-    (8-13s) e nao precisa da resolucao/bitrate original do celular.
-    """
-    if 'video' not in request.files:
-        return jsonify({"error": "envie o arquivo 'video' como multipart/form-data"}), 400
-
-    video_id = uuid.uuid4().hex
-    filename = f"{video_id}.mp4"
-    dest = os.path.join(RAW_DIR, filename)
-    request.files['video'].save(dest)
-
-    # comprime se o arquivo passar de ~80MB (video de celular normalmente
-    # nao precisa de mais que isso para um clipe curto de produto)
+def compress_if_needed(dest, video_id):
+    """Comprime o video se passar de ~80MB - video de celular normalmente
+    nao precisa de mais que isso para um clipe curto de produto."""
     COMPRESS_THRESHOLD_BYTES = 80 * 1024 * 1024
     try:
         original_size = os.path.getsize(dest)
@@ -353,6 +334,111 @@ def upload_raw():
     except Exception:
         # se a compressao falhar por qualquer motivo, segue com o arquivo original
         pass
+
+
+@app.route('/upload-raw', methods=['POST'])
+def upload_raw():
+    """
+    Recebe o video bruto do Sergio (multipart/form-data, campo 'video') e
+    guarda no volume persistente. Devolve o path relativo para salvar na
+    tabela shop_videos (kind='raw').
+
+    Mantido para arquivos pequenos/compatibilidade - para arquivos grandes
+    use /upload-chunk + /upload-complete, que evita o limite de tamanho
+    de requisicao unica do proxy.
+    """
+    if 'video' not in request.files:
+        return jsonify({"error": "envie o arquivo 'video' como multipart/form-data"}), 400
+
+    video_id = uuid.uuid4().hex
+    filename = f"{video_id}.mp4"
+    dest = os.path.join(RAW_DIR, filename)
+    request.files['video'].save(dest)
+
+    compress_if_needed(dest, video_id)
+
+    try:
+        duration = get_duration(dest)
+    except Exception:
+        duration = None
+
+    return jsonify({
+        "id": video_id,
+        "storage_path": f"raw/{filename}",
+        "duration": duration,
+    })
+
+
+CHUNK_TMP_DIR = os.path.join(DATA_DIR, "tmp_uploads")
+os.makedirs(CHUNK_TMP_DIR, exist_ok=True)
+
+
+def _safe_upload_id(upload_id):
+    """Garante que upload_id e um hex simples (sem path traversal)."""
+    if not upload_id or not all(c in '0123456789abcdefABCDEF' for c in upload_id):
+        abort(400, "upload_id invalido")
+    return upload_id
+
+
+@app.route('/upload-chunk', methods=['POST'])
+def upload_chunk():
+    """
+    Recebe um pedaco (chunk) de um upload grande, dividido no navegador.
+    Campos esperados (multipart/form-data):
+      upload_id (string hex, identifica o upload em andamento)
+      chunk_index (int, posicao desse pedaco)
+      chunk (arquivo binario, o pedaco em si)
+    """
+    upload_id = _safe_upload_id(request.form.get('upload_id', ''))
+    chunk_index = request.form.get('chunk_index')
+    if chunk_index is None or 'chunk' not in request.files:
+        return jsonify({"error": "envie upload_id, chunk_index e o arquivo 'chunk'"}), 400
+
+    upload_dir = os.path.join(CHUNK_TMP_DIR, upload_id)
+    os.makedirs(upload_dir, exist_ok=True)
+
+    chunk_path = os.path.join(upload_dir, f"chunk_{int(chunk_index):06d}.part")
+    request.files['chunk'].save(chunk_path)
+
+    return jsonify({"status": "ok", "chunk_index": int(chunk_index)})
+
+
+@app.route('/upload-complete', methods=['POST'])
+def upload_complete():
+    """
+    Remonta os pedacos enviados via /upload-chunk num unico arquivo final,
+    aplica a mesma compressao/analise do /upload-raw, e devolve a mesma
+    resposta (id, storage_path, duration).
+    Espera JSON: { "upload_id": "...", "total_chunks": N }
+    """
+    data = request.get_json(silent=True) or {}
+    upload_id = _safe_upload_id(data.get('upload_id', ''))
+    total_chunks = data.get('total_chunks')
+    if not total_chunks:
+        return jsonify({"error": "informe total_chunks"}), 400
+
+    upload_dir = os.path.join(CHUNK_TMP_DIR, upload_id)
+    if not os.path.isdir(upload_dir):
+        return jsonify({"error": "upload_id nao encontrado"}), 404
+
+    video_id = uuid.uuid4().hex
+    filename = f"{video_id}.mp4"
+    dest = os.path.join(RAW_DIR, filename)
+
+    try:
+        with open(dest, 'wb') as out:
+            for i in range(int(total_chunks)):
+                chunk_path = os.path.join(upload_dir, f"chunk_{i:06d}.part")
+                if not os.path.isfile(chunk_path):
+                    raise FileNotFoundError(f"chunk {i} faltando")
+                with open(chunk_path, 'rb') as cf:
+                    out.write(cf.read())
+    except Exception as e:
+        return jsonify({"error": f"falha ao remontar arquivo: {e}"}), 500
+    finally:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+
+    compress_if_needed(dest, video_id)
 
     try:
         duration = get_duration(dest)
