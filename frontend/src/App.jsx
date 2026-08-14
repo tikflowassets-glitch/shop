@@ -212,7 +212,7 @@ export default function App() {
       if (insertError) throw insertError;
 
       setUploadDone(true);
-      setSuccessMsg(`Vídeo "${videoFile.name}" enviado. As 4 variações serão geradas em breve.`);
+      setSuccessMsg(`Vídeo "${videoFile.name}" enviado.`);
       setVideoFile(null);
       setSelectedCaptions([]);
       loadData();
