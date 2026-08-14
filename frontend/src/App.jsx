@@ -179,11 +179,24 @@ export default function App() {
       }
 
       setFinalizing(true);
-      const completeRes = await fetch(`${PROCESSOR_URL}/upload-complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ upload_id: uploadId, total_chunks: totalChunks }),
-      });
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), 4 * 60 * 1000); // 4 min
+      let completeRes;
+      try {
+        completeRes = await fetch(`${PROCESSOR_URL}/upload-complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ upload_id: uploadId, total_chunks: totalChunks }),
+          signal: timeoutController.signal,
+        });
+      } catch (e) {
+        if (e.name === "AbortError") {
+          throw new Error("O servidor demorou demais para responder (mais de 4 min). O vídeo pode ainda ter sido processado com sucesso do lado do servidor — confira na aba Vídeos antes de tentar de novo.");
+        }
+        throw e;
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if (!completeRes.ok) throw new Error(`Falha ao finalizar envio (${completeRes.status})`);
       const uploadData = await completeRes.json();
 
