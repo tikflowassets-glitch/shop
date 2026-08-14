@@ -134,7 +134,7 @@ export default function App() {
   function toggleCaption(id) {
     setSelectedCaptions((prev) => {
       if (prev.includes(id)) return prev.filter((c) => c !== id);
-      if (prev.length >= 3) return prev;
+      if (prev.length >= 4) return prev;
       return [...prev, id];
     });
   }
@@ -428,7 +428,7 @@ export default function App() {
                 </label>
 
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Legendas ({selectedCaptions.length}/3)</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Legendas ({selectedCaptions.length}/4)</span>
                 </div>
                 <div style={{ position: "relative", marginBottom: 10 }}>
                   <Search size={13} color={C.sub} style={{ position: "absolute", left: 10, top: 10 }} />
@@ -444,7 +444,7 @@ export default function App() {
                   {filteredCaptions.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhuma legenda cadastrada ainda.</p>}
                   {filteredCaptions.map((c) => {
                     const active = selectedCaptions.includes(c.id);
-                    const disabled = !active && selectedCaptions.length >= 3;
+                    const disabled = !active && selectedCaptions.length >= 4;
                     return (
                       <button
                         key={c.id}
