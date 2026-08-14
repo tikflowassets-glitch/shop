@@ -89,6 +89,7 @@ export default function App() {
   const [uploadDone, setUploadDone] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   const [processingProgress, setProcessingProgress] = useState(null); // { current, total }
+  const [justGenerated, setJustGenerated] = useState([]); // paths of the 4 videos just created
 
   const [captionSearch, setCaptionSearch] = useState("");
   const [editingCaption, setEditingCaption] = useState(null);
@@ -142,6 +143,7 @@ export default function App() {
     if (!videoFile || selectedCaptions.length === 0 || !PROCESSOR_URL) return;
     setUploading(true);
     setErrorMsg(null);
+    setJustGenerated([]);
     try {
       // 1. sobe o video bruto
       const form = new FormData();
@@ -219,6 +221,8 @@ export default function App() {
           status: "ready",
         });
         if (procInsertError) throw procInsertError;
+
+        setJustGenerated((prev) => [...prev, processData.storage_path]);
       }
 
       // 3. marca o bruto como totalmente gerado
@@ -496,6 +500,30 @@ export default function App() {
                 >
                   {uploading ? "Enviando..." : processingProgress ? `Processando ${processingProgress.current}/${processingProgress.total}...` : uploadDone ? "Pronto!" : "Enviar vídeo"}
                 </button>
+
+                {justGenerated.length > 0 && (
+                  <div style={{ marginTop: 22 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>
+                      Variações geradas ({justGenerated.length}/4)
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+                      {justGenerated.map((path, i) => (
+                        <div key={path} style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}`, background: "#000" }}>
+                          <video
+                            controls
+                            playsInline
+                            preload="metadata"
+                            src={`${PROCESSOR_URL}/videos/${path}`}
+                            style={{ width: "100%", display: "block", aspectRatio: "9/16", background: "#000" }}
+                          />
+                          <div style={{ fontSize: 10.5, color: C.sub, padding: "4px 6px", background: C.card }}>
+                            Variação {i + 1}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
