@@ -748,9 +748,10 @@ export default function App() {
                 <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Meus vídeos</h2>
                 <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 16px" }}>Resumo de tudo que já foi processado.</p>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8, marginBottom: 20 }}>
                   {[
-                    { label: "Prontos p/ postar", count: videos.filter((v) => v.status === "ready" || v.status === "pending").length, color: "#6b8a6f", bg: "#eaf0e9" },
+                    { label: "Aguardando processar", count: videos.filter((v) => v.kind === "raw" && v.status === "pending").length, color: "#8a7a5c", bg: "#f5f0e4" },
+                    { label: "Prontos p/ postar", count: videos.filter((v) => v.kind === "processed" && v.status === "ready").length, color: "#6b8a6f", bg: "#eaf0e9" },
                     { label: "Postados", count: videos.filter((v) => v.status === "posted").length, color: "#6b7f8a", bg: "#e9eef0" },
                     { label: "Falharam", count: videos.filter((v) => v.status === "failed").length, color: "#a3766b", bg: "#f3e9e6" },
                   ].map((s) => (
@@ -760,6 +761,11 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+                {videos.filter((v) => v.kind === "raw" && v.status === "pending").length > 0 && (
+                  <div style={{ padding: "10px 12px", borderRadius: 8, background: "#f5f0e4", color: "#8a7a5c", fontSize: 11.5, marginBottom: 16 }}>
+                    Vídeos "aguardando processar" ficaram travados no meio da geração (ex: a aba foi fechada antes de terminar). Suba-os de novo para gerar as variações.
+                  </div>
+                )}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {videos.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhum vídeo enviado ainda.</p>}
