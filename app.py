@@ -188,7 +188,7 @@ def apply_caption(input_path, workdir, caption_text, align):
     # altura real do video, para calcular o tamanho de fonte que cabe
     r = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
              '-show_entries', 'stream=height', '-of', 'csv=p=0', input_path])
-    video_height = int(r.stdout.strip())
+    video_height = int(r.stdout.strip().split(',')[0])
 
     lines = [ln for ln in caption_text.split('\n')]
     n_lines = max(1, len(lines))
