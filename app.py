@@ -319,16 +319,21 @@ def _safe_join(base, *parts):
 
 def compress_if_needed(dest, video_id):
     """Comprime o video se passar de ~80MB - video de celular normalmente
-    nao precisa de mais que isso para um clipe curto de produto."""
+    nao precisa de mais que isso para um clipe curto de produto.
+
+    Configuracao pensada para consumir pouca memoria (VPS com RAM limitada
+    compartilhada entre varios servicos) - resolucao mais baixa, preset
+    ultrafast (usa menos RAM/CPU que 'fast') e threads limitadas."""
     COMPRESS_THRESHOLD_BYTES = 80 * 1024 * 1024
     try:
         original_size = os.path.getsize(dest)
         if original_size > COMPRESS_THRESHOLD_BYTES:
             compressed = os.path.join(RAW_DIR, f"{video_id}_compressed.mp4")
             run(['ffmpeg', '-y', '-i', dest,
-                 '-vf', "scale='min(1080,iw)':-2",
-                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-                 '-c:a', 'aac', '-b:a', '128k',
+                 '-vf', "scale='min(720,iw)':-2",
+                 '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '26',
+                 '-threads', '2',
+                 '-c:a', 'aac', '-b:a', '96k',
                  compressed])
             os.replace(compressed, dest)
     except Exception:
