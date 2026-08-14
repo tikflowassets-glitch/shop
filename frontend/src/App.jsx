@@ -86,6 +86,7 @@ export default function App() {
   const [selectedCaptions, setSelectedCaptions] = useState([]);
   const [videoFile, setVideoFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
   const [uploadDone, setUploadDone] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   // (geracao das variacoes agora roda via workflow do n8n, nao mais no navegador)
@@ -141,14 +142,34 @@ export default function App() {
   async function handleSend() {
     if (!videoFile || selectedCaptions.length === 0 || !PROCESSOR_URL) return;
     setUploading(true);
+    setUploadPercent(0);
     setErrorMsg(null);
-    setJustGenerated([]);
     try {
       const form = new FormData();
       form.append("video", videoFile);
-      const res = await fetch(`${PROCESSOR_URL}/upload-raw`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(`Falha no envio (${res.status})`);
-      const uploadData = await res.json();
+
+      const uploadData = await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${PROCESSOR_URL}/upload-raw`);
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadPercent(Math.round((e.loaded / e.total) * 100));
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              reject(new Error("Resposta inválida do servidor"));
+            }
+          } else {
+            reject(new Error(`Falha no envio (${xhr.status})`));
+          }
+        };
+        xhr.onerror = () => reject(new Error("Falha de rede durante o envio"));
+        xhr.send(form);
+      });
 
       const { error: insertError } = await supabase.from("shop_videos").insert({
         kind: "raw",
@@ -398,6 +419,22 @@ export default function App() {
                   })}
                 </div>
 
+                {uploading && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
+                        Enviando vídeo... {uploadPercent}%
+                      </span>
+                    </div>
+                    <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
+                      <div style={{
+                        width: `${uploadPercent}%`,
+                        height: "100%", background: C.accent, borderRadius: 10, transition: "width 0.2s ease",
+                      }} />
+                    </div>
+                  </div>
+                )}
+
                 <button
                   onClick={handleSend}
                   disabled={!videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL}
@@ -408,7 +445,7 @@ export default function App() {
                     fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading ? "not-allowed" : "pointer",
                   }}
                 >
-                  {uploading ? "Enviando..." : uploadDone ? "Enviado!" : "Enviar vídeo"}
+                  {uploading ? `Enviando... ${uploadPercent}%` : uploadDone ? "Enviado!" : "Enviar vídeo"}
                 </button>
               </div>
             )}
