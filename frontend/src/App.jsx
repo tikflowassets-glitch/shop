@@ -179,6 +179,19 @@ export default function App() {
         return arr[Math.floor(Math.random() * arr.length)];
       }
 
+      async function fetchWithRetry(url, options, retries = 3, delayMs = 2000, onRetry) {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const r = await fetch(url, options);
+            return r;
+          } catch (e) {
+            if (attempt === retries) throw e;
+            if (onRetry) onRetry(attempt);
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+        }
+      }
+
       for (let i = 0; i < TOTAL_VARIATIONS; i++) {
         setProcessingProgress({ current: i + 1, total: TOTAL_VARIATIONS });
 
@@ -188,23 +201,29 @@ export default function App() {
         const maxStart = Math.max(0, rawDuration - thisDuration);
         const startOffset = Math.random() * maxStart;
 
-        const processRes = await fetch(`${PROCESSOR_URL}/process-stored`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            raw_video_path: uploadData.storage_path,
-            music_path: pickedMusic?.storage_path,
-            beat_timestamps: pickedMusic?.beat_timestamps,
-            beats_per_cut: 1,
-            reorder_mode: "blocks",
-            num_blocks: 4,
-            color_grade: true,
-            caption_text: pickedCaption?.caption_text,
-            caption_align: pickedCaption?.align,
-            start_offset: Math.round(startOffset * 100) / 100,
-            max_duration: Math.round(thisDuration * 100) / 100,
-          }),
-        });
+        const processRes = await fetchWithRetry(
+          `${PROCESSOR_URL}/process-stored`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              raw_video_path: uploadData.storage_path,
+              music_path: pickedMusic?.storage_path,
+              beat_timestamps: pickedMusic?.beat_timestamps,
+              beats_per_cut: 1,
+              reorder_mode: "blocks",
+              num_blocks: 4,
+              color_grade: true,
+              caption_text: pickedCaption?.caption_text,
+              caption_align: pickedCaption?.align,
+              start_offset: Math.round(startOffset * 100) / 100,
+              max_duration: Math.round(thisDuration * 100) / 100,
+            }),
+          },
+          3,
+          2000,
+          (attempt) => setProcessingProgress({ current: i + 1, total: TOTAL_VARIATIONS, retrying: attempt })
+        );
         if (!processRes.ok) {
           const errBody = await processRes.text();
           throw new Error(`Falha ao processar variação ${i + 1}/${TOTAL_VARIATIONS}: ${errBody}`);
@@ -473,7 +492,9 @@ export default function App() {
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
-                        Gerando variação {processingProgress.current} de {processingProgress.total}...
+                        {processingProgress.retrying
+                          ? `Reconectando (tentativa ${processingProgress.retrying}/3)... variação ${processingProgress.current} de ${processingProgress.total}`
+                          : `Gerando variação ${processingProgress.current} de ${processingProgress.total}...`}
                       </span>
                     </div>
                     <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
