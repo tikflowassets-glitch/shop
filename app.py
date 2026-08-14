@@ -174,12 +174,31 @@ def apply_caption(input_path, workdir, caption_text, align):
     definidas no seletor visual do app: top-center, center-center,
     center-right (com respiro da borda) e bottom-center.
     align = {"v": "top"|"center"|"bottom", "h": "center"|"right"}
+
+    O tamanho da fonte e calculado dinamicamente com base no numero de
+    linhas do texto, para textos longos (ex: tabela de tamanhos) nunca
+    estourarem a altura do video.
     """
     if not caption_text:
         return input_path
 
     v = (align or {}).get('v', 'center')
     h = (align or {}).get('h', 'center')
+
+    # altura real do video, para calcular o tamanho de fonte que cabe
+    r = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+             '-show_entries', 'stream=height', '-of', 'csv=p=0', input_path])
+    video_height = int(r.stdout.strip())
+
+    lines = [ln for ln in caption_text.split('\n')]
+    n_lines = max(1, len(lines))
+
+    # orcamento de altura disponivel para o bloco de texto (evita as faixas
+    # de UI do TikTok: ~10% topo, ~18% base, ~17% coluna direita)
+    max_block_height = video_height * 0.45
+    raw_fontsize = int(max_block_height / n_lines)
+    fontsize = max(10, min(22, raw_fontsize - 4))
+    line_spacing = max(2, fontsize // 5)
 
     x_map = {
         'center': '(w-tw)/2',
@@ -199,7 +218,7 @@ def apply_caption(input_path, workdir, caption_text, align):
 
     filt = (
         f"drawtext=fontfile='{FONT_BOLD}':textfile='{text_file}':"
-        f"fontcolor=white:fontsize=22:line_spacing=6:bordercolor=black:borderw=2:"
+        f"fontcolor=white:fontsize={fontsize}:line_spacing={line_spacing}:bordercolor=black:borderw=2:"
         f"x={x_expr}:y={y_expr}"
     )
 
