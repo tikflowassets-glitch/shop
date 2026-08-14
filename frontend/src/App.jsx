@@ -88,8 +88,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
-  const [processingProgress, setProcessingProgress] = useState(null); // { current, total }
-  const [justGenerated, setJustGenerated] = useState([]); // paths of the 4 videos just created
+  // (geracao das variacoes agora roda via workflow do n8n, nao mais no navegador)
 
   const [captionSearch, setCaptionSearch] = useState("");
   const [editingCaption, setEditingCaption] = useState(null);
@@ -145,131 +144,25 @@ export default function App() {
     setErrorMsg(null);
     setJustGenerated([]);
     try {
-      // 1. sobe o video bruto
       const form = new FormData();
       form.append("video", videoFile);
       const res = await fetch(`${PROCESSOR_URL}/upload-raw`, { method: "POST", body: form });
       if (!res.ok) throw new Error(`Falha no envio (${res.status})`);
       const uploadData = await res.json();
 
-      const { data: rawRow, error: insertError } = await supabase
-        .from("shop_videos")
-        .insert({
-          kind: "raw",
-          storage_path: uploadData.storage_path,
-          duration: uploadData.duration,
-          caption_ids: selectedCaptions,
-          status: "pending",
-          uploaded_by: "sergio",
-          max_uses: 4,
-        })
-        .select()
-        .single();
+      const { error: insertError } = await supabase.from("shop_videos").insert({
+        kind: "raw",
+        storage_path: uploadData.storage_path,
+        duration: uploadData.duration,
+        caption_ids: selectedCaptions,
+        status: "pending",
+        uploaded_by: "sergio",
+        max_uses: 4,
+      });
       if (insertError) throw insertError;
 
-      setUploading(false);
-
-      // 2. gera as 4 variacoes na hora, uma de cada vez, mostrando progresso
-      const TOTAL_VARIATIONS = 4;
-      const eligibleCaptions = captions.filter((c) => selectedCaptions.includes(c.id));
-      const rawDuration = uploadData.duration || 30;
-
-      function pickRandom(arr) {
-        if (!arr || arr.length === 0) return null;
-        return arr[Math.floor(Math.random() * arr.length)];
-      }
-
-      function shuffle(arr) {
-        const a = [...arr];
-        for (let i = a.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [a[i], a[j]] = [a[j], a[i]];
-        }
-        return a;
-      }
-
-      // monta a atribuicao de legendas sem repetir enquanto houver opcao diferente disponivel:
-      // embaralha o pool e vai ciclando - só repete depois de esgotar todas as distintas
-      const captionPool = eligibleCaptions.length ? eligibleCaptions : captions;
-      const captionAssignment = [];
-      while (captionAssignment.length < TOTAL_VARIATIONS && captionPool.length > 0) {
-        captionAssignment.push(...shuffle(captionPool));
-      }
-
-      async function fetchWithRetry(url, options, retries = 3, delayMs = 2000, onRetry) {
-        for (let attempt = 1; attempt <= retries; attempt++) {
-          try {
-            const r = await fetch(url, options);
-            return r;
-          } catch (e) {
-            if (attempt === retries) throw e;
-            if (onRetry) onRetry(attempt);
-            await new Promise((resolve) => setTimeout(resolve, delayMs));
-          }
-        }
-      }
-
-      for (let i = 0; i < TOTAL_VARIATIONS; i++) {
-        setProcessingProgress({ current: i + 1, total: TOTAL_VARIATIONS });
-
-        const pickedMusic = pickRandom(music);
-        const pickedCaption = captionAssignment[i] || null;
-        const thisDuration = 8 + Math.random() * 5; // 8-13s
-        const maxStart = Math.max(0, rawDuration - thisDuration);
-        const startOffset = Math.random() * maxStart;
-
-        const processRes = await fetchWithRetry(
-          `${PROCESSOR_URL}/process-stored`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              raw_video_path: uploadData.storage_path,
-              music_path: pickedMusic?.storage_path,
-              beat_timestamps: pickedMusic?.beat_timestamps,
-              beats_per_cut: 1,
-              reorder_mode: "blocks",
-              num_blocks: 4,
-              color_grade: true,
-              caption_text: pickedCaption?.caption_text,
-              caption_align: pickedCaption?.align,
-              start_offset: Math.round(startOffset * 100) / 100,
-              max_duration: Math.round(thisDuration * 100) / 100,
-            }),
-          },
-          3,
-          2000,
-          (attempt) => setProcessingProgress({ current: i + 1, total: TOTAL_VARIATIONS, retrying: attempt })
-        );
-        if (!processRes.ok) {
-          const errBody = await processRes.text();
-          throw new Error(`Falha ao processar variação ${i + 1}/${TOTAL_VARIATIONS}: ${errBody}`);
-        }
-        const processData = await processRes.json();
-
-        const { error: procInsertError } = await supabase.from("shop_videos").insert({
-          kind: "processed",
-          parent_id: rawRow.id,
-          music_id: pickedMusic?.id || null,
-          caption_id: pickedCaption?.id || null,
-          account_id: null, // atribuida na hora de postar
-          storage_path: processData.storage_path,
-          status: "ready",
-        });
-        if (procInsertError) throw procInsertError;
-
-        setJustGenerated((prev) => [...prev, processData.storage_path]);
-      }
-
-      // 3. marca o bruto como totalmente gerado
-      await supabase
-        .from("shop_videos")
-        .update({ status: "generated", times_used: TOTAL_VARIATIONS, last_used_at: new Date().toISOString() })
-        .eq("id", rawRow.id);
-
-      setProcessingProgress(null);
       setUploadDone(true);
-      setSuccessMsg(`Vídeo "${videoFile.name}" processado: ${TOTAL_VARIATIONS} variações prontas para postar.`);
+      setSuccessMsg(`Vídeo "${videoFile.name}" enviado. As 4 variações serão geradas em breve.`);
       setVideoFile(null);
       setSelectedCaptions([]);
       loadData();
@@ -505,63 +398,18 @@ export default function App() {
                   })}
                 </div>
 
-                {processingProgress && (
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
-                        {processingProgress.retrying
-                          ? `Reconectando (tentativa ${processingProgress.retrying}/3)... variação ${processingProgress.current} de ${processingProgress.total}`
-                          : `Gerando variação ${processingProgress.current} de ${processingProgress.total}...`}
-                      </span>
-                    </div>
-                    <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
-                      <div style={{
-                        width: `${(processingProgress.current / processingProgress.total) * 100}%`,
-                        height: "100%", background: C.accent, borderRadius: 10, transition: "width 0.3s ease",
-                      }} />
-                    </div>
-                    <div style={{ fontSize: 10.5, color: C.sub, marginTop: 6 }}>
-                      Não feche esta tela até terminar — cada variação leva cerca de 30-60s.
-                    </div>
-                  </div>
-                )}
-
                 <button
                   onClick={handleSend}
-                  disabled={!videoFile || selectedCaptions.length === 0 || uploading || !!processingProgress || !PROCESSOR_URL}
+                  disabled={!videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL}
                   style={{
                     width: "100%", padding: "12px", borderRadius: 10, border: "none",
-                    background: !videoFile || selectedCaptions.length === 0 || uploading || processingProgress || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
-                    color: !videoFile || selectedCaptions.length === 0 || uploading || processingProgress || !PROCESSOR_URL ? "#a8a498" : "#fff",
-                    fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading || processingProgress ? "not-allowed" : "pointer",
+                    background: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
+                    color: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#a8a498" : "#fff",
+                    fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading ? "not-allowed" : "pointer",
                   }}
                 >
-                  {uploading ? "Enviando..." : processingProgress ? `Processando ${processingProgress.current}/${processingProgress.total}...` : uploadDone ? "Pronto!" : "Enviar vídeo"}
+                  {uploading ? "Enviando..." : uploadDone ? "Enviado!" : "Enviar vídeo"}
                 </button>
-
-                {justGenerated.length > 0 && (
-                  <div style={{ marginTop: 22 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>
-                      Variações geradas ({justGenerated.length}/4)
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
-                      {justGenerated.map((path, i) => (
-                        <div key={path} style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${C.border}`, background: "#000" }}>
-                          <video
-                            controls
-                            playsInline
-                            preload="metadata"
-                            src={`${PROCESSOR_URL}/videos/${path}`}
-                            style={{ width: "100%", display: "block", aspectRatio: "9/16", background: "#000" }}
-                          />
-                          <div style={{ fontSize: 10.5, color: C.sub, padding: "4px 6px", background: C.card }}>
-                            Variação {i + 1}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 
