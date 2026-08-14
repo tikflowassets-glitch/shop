@@ -145,31 +145,44 @@ export default function App() {
     setUploadPercent(0);
     setErrorMsg(null);
     try {
-      const form = new FormData();
-      form.append("video", videoFile);
+      const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB por pedaço
+      const totalChunks = Math.ceil(videoFile.size / CHUNK_SIZE);
+      const uploadId = crypto.randomUUID().replace(/-/g, "");
 
-      const uploadData = await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", `${PROCESSOR_URL}/upload-raw`);
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            setUploadPercent(Math.round((e.loaded / e.total) * 100));
+      async function uploadChunkWithRetry(chunkBlob, index, retries = 3) {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const chunkForm = new FormData();
+            chunkForm.append("upload_id", uploadId);
+            chunkForm.append("chunk_index", String(index));
+            chunkForm.append("chunk", chunkBlob);
+            const res = await fetch(`${PROCESSOR_URL}/upload-chunk`, { method: "POST", body: chunkForm });
+            if (!res.ok) throw new Error(`Falha no pedaço ${index} (${res.status})`);
+            return;
+          } catch (e) {
+            if (attempt === retries) throw e;
+            await new Promise((r) => setTimeout(r, 1500));
           }
-        };
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-              resolve(JSON.parse(xhr.responseText));
-            } catch {
-              reject(new Error("Resposta inválida do servidor"));
-            }
-          } else {
-            reject(new Error(`Falha no envio (${xhr.status})`));
-          }
-        };
-        xhr.onerror = () => reject(new Error("Falha de rede durante o envio"));
-        xhr.send(form);
+        }
+      }
+
+      let bytesSent = 0;
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, videoFile.size);
+        const chunkBlob = videoFile.slice(start, end);
+        await uploadChunkWithRetry(chunkBlob, i);
+        bytesSent += chunkBlob.size;
+        setUploadPercent(Math.round((bytesSent / videoFile.size) * 100));
+      }
+
+      const completeRes = await fetch(`${PROCESSOR_URL}/upload-complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upload_id: uploadId, total_chunks: totalChunks }),
       });
+      if (!completeRes.ok) throw new Error(`Falha ao finalizar envio (${completeRes.status})`);
+      const uploadData = await completeRes.json();
 
       const { error: insertError } = await supabase.from("shop_videos").insert({
         kind: "raw",
