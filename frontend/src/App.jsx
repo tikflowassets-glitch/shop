@@ -79,6 +79,7 @@ export default function App() {
   const [captions, setCaptions] = useState([]);
   const [videos, setVideos] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [music, setMusic] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
 
@@ -87,6 +88,7 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
+  const [processingProgress, setProcessingProgress] = useState(null); // { current, total }
 
   const [captionSearch, setCaptionSearch] = useState("");
   const [editingCaption, setEditingCaption] = useState(null);
@@ -102,17 +104,20 @@ export default function App() {
   async function loadData() {
     setLoading(true);
     setErrorMsg(null);
-    const [capRes, vidRes, accRes] = await Promise.all([
+    const [capRes, vidRes, accRes, musRes] = await Promise.all([
       supabase.from("shop_captions").select("*").order("created_at", { ascending: false }),
       supabase.from("shop_videos").select("*").order("created_at", { ascending: false }).limit(50),
       supabase.from("shop_accounts").select("*").order("created_at", { ascending: false }),
+      supabase.from("shop_music_bank").select("*").eq("active", true),
     ]);
     if (capRes.error) setErrorMsg(capRes.error.message);
     if (vidRes.error) setErrorMsg(vidRes.error.message);
     if (accRes.error) setErrorMsg(accRes.error.message);
+    if (musRes.error) setErrorMsg(musRes.error.message);
     setCaptions(capRes.data || []);
     setVideos(vidRes.data || []);
     setAccounts(accRes.data || []);
+    setMusic(musRes.data || []);
     setLoading(false);
   }
 
@@ -138,25 +143,93 @@ export default function App() {
     setUploading(true);
     setErrorMsg(null);
     try {
+      // 1. sobe o video bruto
       const form = new FormData();
       form.append("video", videoFile);
       const res = await fetch(`${PROCESSOR_URL}/upload-raw`, { method: "POST", body: form });
       if (!res.ok) throw new Error(`Falha no envio (${res.status})`);
-      const data = await res.json();
+      const uploadData = await res.json();
 
-      const { error } = await supabase.from("shop_videos").insert({
-        kind: "raw",
-        storage_path: data.storage_path,
-        duration: data.duration,
-        caption_ids: selectedCaptions,
-        status: "pending",
-        uploaded_by: "sergio",
-        max_uses: 4,
-      });
-      if (error) throw error;
+      const { data: rawRow, error: insertError } = await supabase
+        .from("shop_videos")
+        .insert({
+          kind: "raw",
+          storage_path: uploadData.storage_path,
+          duration: uploadData.duration,
+          caption_ids: selectedCaptions,
+          status: "pending",
+          uploaded_by: "sergio",
+          max_uses: 4,
+        })
+        .select()
+        .single();
+      if (insertError) throw insertError;
 
+      setUploading(false);
+
+      // 2. gera as 4 variacoes na hora, uma de cada vez, mostrando progresso
+      const TOTAL_VARIATIONS = 4;
+      const eligibleCaptions = captions.filter((c) => selectedCaptions.includes(c.id));
+      const rawDuration = uploadData.duration || 30;
+
+      function pickRandom(arr) {
+        if (!arr || arr.length === 0) return null;
+        return arr[Math.floor(Math.random() * arr.length)];
+      }
+
+      for (let i = 0; i < TOTAL_VARIATIONS; i++) {
+        setProcessingProgress({ current: i + 1, total: TOTAL_VARIATIONS });
+
+        const pickedMusic = pickRandom(music);
+        const pickedCaption = pickRandom(eligibleCaptions.length ? eligibleCaptions : captions);
+        const thisDuration = 8 + Math.random() * 5; // 8-13s
+        const maxStart = Math.max(0, rawDuration - thisDuration);
+        const startOffset = Math.random() * maxStart;
+
+        const processRes = await fetch(`${PROCESSOR_URL}/process-stored`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            raw_video_path: uploadData.storage_path,
+            music_path: pickedMusic?.storage_path,
+            beat_timestamps: pickedMusic?.beat_timestamps,
+            beats_per_cut: 1,
+            reorder_mode: "blocks",
+            num_blocks: 4,
+            color_grade: true,
+            caption_text: pickedCaption?.caption_text,
+            caption_align: pickedCaption?.align,
+            start_offset: Math.round(startOffset * 100) / 100,
+            max_duration: Math.round(thisDuration * 100) / 100,
+          }),
+        });
+        if (!processRes.ok) {
+          const errBody = await processRes.text();
+          throw new Error(`Falha ao processar variação ${i + 1}/${TOTAL_VARIATIONS}: ${errBody}`);
+        }
+        const processData = await processRes.json();
+
+        const { error: procInsertError } = await supabase.from("shop_videos").insert({
+          kind: "processed",
+          parent_id: rawRow.id,
+          music_id: pickedMusic?.id || null,
+          caption_id: pickedCaption?.id || null,
+          account_id: null, // atribuida na hora de postar
+          storage_path: processData.storage_path,
+          status: "ready",
+        });
+        if (procInsertError) throw procInsertError;
+      }
+
+      // 3. marca o bruto como totalmente gerado
+      await supabase
+        .from("shop_videos")
+        .update({ status: "generated", times_used: TOTAL_VARIATIONS, last_used_at: new Date().toISOString() })
+        .eq("id", rawRow.id);
+
+      setProcessingProgress(null);
       setUploadDone(true);
-      setSuccessMsg(`Vídeo "${videoFile.name}" enviado com sucesso.`);
+      setSuccessMsg(`Vídeo "${videoFile.name}" processado: ${TOTAL_VARIATIONS} variações prontas para postar.`);
       setVideoFile(null);
       setSelectedCaptions([]);
       loadData();
@@ -164,6 +237,7 @@ export default function App() {
       setTimeout(() => setSuccessMsg(null), 6000);
     } catch (e) {
       setErrorMsg(e.message);
+      setProcessingProgress(null);
     } finally {
       setUploading(false);
     }
@@ -391,17 +465,36 @@ export default function App() {
                   })}
                 </div>
 
+                {processingProgress && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
+                        Gerando variação {processingProgress.current} de {processingProgress.total}...
+                      </span>
+                    </div>
+                    <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
+                      <div style={{
+                        width: `${(processingProgress.current / processingProgress.total) * 100}%`,
+                        height: "100%", background: C.accent, borderRadius: 10, transition: "width 0.3s ease",
+                      }} />
+                    </div>
+                    <div style={{ fontSize: 10.5, color: C.sub, marginTop: 6 }}>
+                      Não feche esta tela até terminar — cada variação leva cerca de 30-60s.
+                    </div>
+                  </div>
+                )}
+
                 <button
                   onClick={handleSend}
-                  disabled={!videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL}
+                  disabled={!videoFile || selectedCaptions.length === 0 || uploading || !!processingProgress || !PROCESSOR_URL}
                   style={{
                     width: "100%", padding: "12px", borderRadius: 10, border: "none",
-                    background: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
-                    color: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#a8a498" : "#fff",
-                    fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading ? "not-allowed" : "pointer",
+                    background: !videoFile || selectedCaptions.length === 0 || uploading || processingProgress || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
+                    color: !videoFile || selectedCaptions.length === 0 || uploading || processingProgress || !PROCESSOR_URL ? "#a8a498" : "#fff",
+                    fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading || processingProgress ? "not-allowed" : "pointer",
                   }}
                 >
-                  {uploading ? "Enviando..." : uploadDone ? "Enviado" : "Enviar vídeo"}
+                  {uploading ? "Enviando..." : processingProgress ? `Processando ${processingProgress.current}/${processingProgress.total}...` : uploadDone ? "Pronto!" : "Enviar vídeo"}
                 </button>
               </div>
             )}
