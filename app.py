@@ -193,10 +193,12 @@ def apply_caption(input_path, workdir, caption_text, align):
     v = (align or {}).get('v', 'center')
     h = (align or {}).get('h', 'center')
 
-    # altura real do video, para calcular o tamanho de fonte que cabe
+    # dimensoes reais do video, para calcular o tamanho de fonte que cabe
     r = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-             '-show_entries', 'stream=height', '-of', 'csv=p=0', input_path])
-    video_height = int(r.stdout.strip().split(',')[0])
+             '-show_entries', 'stream=width,height', '-of', 'csv=p=0', input_path])
+    dims = r.stdout.strip().split(',')
+    video_width = int(dims[0])
+    video_height = int(dims[1])
 
     lines = caption_text.split('\n')
     content_lines = [ln for ln in lines if ln.strip() != '']
@@ -209,13 +211,20 @@ def apply_caption(input_path, workdir, caption_text, align):
     # orcamento de altura disponivel para o bloco de texto (evita as faixas
     # de UI do TikTok: ~10% topo, ~18% base, ~17% coluna direita)
     max_block_height = video_height * 0.72
-    raw_fontsize = int(max_block_height / effective_lines)
-    # min/max PROPORCIONAIS a altura do video (nao pixels fixos!) - sem
-    # compressao o video pode vir em qualquer resolucao, um numero fixo de
-    # pixels fica minusculo num video de alta resolucao e gigante num pequeno
-    min_fontsize = int(video_height * 0.035)
-    max_fontsize = int(video_height * 0.065)
-    fontsize = max(min_fontsize, min(max_fontsize, raw_fontsize))
+    fontsize_by_height = int(max_block_height / effective_lines)
+
+    # orcamento de LARGURA - a linha mais comprida do texto nao pode estourar
+    # os lados do video. Aproximacao: fonte bold sans-serif tem largura media
+    # por caractere de ~0.56x o tamanho da fonte
+    max_line_len = max((len(ln) for ln in content_lines), default=1)
+    max_block_width = video_width * 0.82
+    fontsize_by_width = int(max_block_width / (max_line_len * 0.56))
+
+    # usa o menor dos dois (o que for mais restritivo), com piso/teto
+    # proporcionais a altura do video para nunca ficar minusculo nem gigante
+    min_fontsize = int(video_height * 0.025)
+    max_fontsize = int(video_height * 0.055)
+    fontsize = max(min_fontsize, min(max_fontsize, fontsize_by_height, fontsize_by_width))
     line_spacing = max(4, fontsize // 5)
 
     x_map = {
