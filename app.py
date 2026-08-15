@@ -214,17 +214,16 @@ def apply_caption(input_path, workdir, caption_text, align):
     fontsize_by_height = int(max_block_height / effective_lines)
 
     # orcamento de LARGURA - a linha mais comprida do texto nao pode estourar
-    # os lados do video. Aproximacao: fonte bold sans-serif tem largura media
-    # por caractere de ~0.62x o tamanho da fonte (mais conservador, evita
-    # a linha mais comprida estourar a largura do video)
+    # os lados do video. Aproximacao mais conservadora (a anterior ainda
+    # deixava estourar): fonte bold larga por caractere ~0.72x o tamanho
     max_line_len = max((len(ln) for ln in content_lines), default=1)
-    max_block_width = video_width * 0.75
-    fontsize_by_width = int(max_block_width / (max_line_len * 0.62))
+    max_block_width = video_width * 0.68
+    fontsize_by_width = int(max_block_width / (max_line_len * 0.72))
 
     # usa o menor dos dois (o que for mais restritivo), com piso/teto
     # proporcionais a altura do video para nunca ficar minusculo nem gigante
-    min_fontsize = int(video_height * 0.022)
-    max_fontsize = int(video_height * 0.05)
+    min_fontsize = int(video_height * 0.020)
+    max_fontsize = int(video_height * 0.045)
     fontsize = max(min_fontsize, min(max_fontsize, fontsize_by_height, fontsize_by_width))
     line_spacing = max(4, fontsize // 5)
     # contorno proporcional ao tamanho da fonte - em 2px fixo fica quase
