@@ -31,5 +31,6 @@ COPY app.py .
 
 EXPOSE 5000
 
-# timeout alto porque processamento de video pode demorar (deteccao de batida + ffmpeg)
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "300", "app:app"]
+# timeout alto porque processamento de video sem compressao pode demorar bastante
+# (deteccao de batida + varios passos de ffmpeg em video de alta resolucao)
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "1200", "app:app"]
