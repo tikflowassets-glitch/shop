@@ -596,11 +596,23 @@ def process_stored():
         out_dest = os.path.join(PROCESSED_DIR, out_filename)
         shutil.copy(current, out_dest)
 
+        # dimensoes reais do video final - pra sempre sabermos o numero
+        # verdadeiro, sem precisar adivinhar
+        try:
+            dim_r = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                         '-show_entries', 'stream=width,height', '-of', 'csv=p=0', out_dest])
+            dim_parts = dim_r.stdout.strip().split(',')
+            out_width, out_height = int(dim_parts[0]), int(dim_parts[1])
+        except Exception:
+            out_width, out_height = None, None
+
         return jsonify({
             "id": out_id,
             "storage_path": f"processed/{out_filename}",
             "segments": n,
             "duration": total_dur,
+            "width": out_width,
+            "height": out_height,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
