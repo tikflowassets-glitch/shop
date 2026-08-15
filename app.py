@@ -210,7 +210,12 @@ def apply_caption(input_path, workdir, caption_text, align):
     # de UI do TikTok: ~10% topo, ~18% base, ~17% coluna direita)
     max_block_height = video_height * 0.72
     raw_fontsize = int(max_block_height / effective_lines)
-    fontsize = max(28, min(38, raw_fontsize))
+    # min/max PROPORCIONAIS a altura do video (nao pixels fixos!) - sem
+    # compressao o video pode vir em qualquer resolucao, um numero fixo de
+    # pixels fica minusculo num video de alta resolucao e gigante num pequeno
+    min_fontsize = int(video_height * 0.035)
+    max_fontsize = int(video_height * 0.065)
+    fontsize = max(min_fontsize, min(max_fontsize, raw_fontsize))
     line_spacing = max(4, fontsize // 5)
 
     x_map = {
