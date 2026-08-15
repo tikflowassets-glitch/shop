@@ -455,7 +455,7 @@ export default function App() {
                   <div style={{ marginBottom: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
-                        {finalizing ? "Finalizando no servidor (juntando e comprimindo)..." : `Enviando vídeo... ${uploadPercent}%`}
+                        {finalizing ? "Finalizando no servidor (juntando os pedaços)..." : `Enviando vídeo... ${uploadPercent}%`}
                       </span>
                     </div>
                     <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
