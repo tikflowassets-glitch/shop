@@ -240,6 +240,10 @@ def apply_caption(input_path, workdir, caption_text, align):
     min_fontsize = int(video_height * 0.020)
     max_fontsize = int(video_height * 0.045)
     fontsize = max(min_fontsize, min(max_fontsize, fontsize_by_height, fontsize_by_width))
+    # reduz o tamanho final da fonte (pedido explicito - letra grande demais).
+    # ajustar esse multiplicador pra mais/menos conforme feedback visual.
+    FONT_SCALE = 0.80
+    fontsize = max(1, int(fontsize * FONT_SCALE))
     line_spacing = max(4, fontsize // 5)
     # contorno proporcional ao tamanho da fonte - em 2px fixo fica quase
     # invisivel em fontes grandes
@@ -659,3 +663,4 @@ def delete_video(relpath):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
+
