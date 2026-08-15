@@ -1,6 +1,5 @@
 import os
 import json
-import re
 import shutil
 import subprocess
 import tempfile
@@ -12,7 +11,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)  # permite chamadas do frontend (Vercel) para este servidor
 
-FONT_BOLD = "/usr/share/fonts/truetype/poppins/Poppins-Bold.ttf"
+FONT_BOLD = "/usr/share/fonts/truetype/tiktoksans/TikTokSans-Bold.ttf"
 
 # volume persistente montado no EasyPanel (sobrevive a restart/redeploy)
 DATA_DIR = "/data/shop-videos"
@@ -169,29 +168,6 @@ def apply_color_grade(input_path, workdir):
     return out
 
 
-EMOJI_PATTERN = re.compile(
-    "["
-    "\U0001F300-\U0001FAFF"  # simbolos e pictogramas diversos, emoticons, transporte, etc
-    "\U00002600-\U000027BF"  # simbolos diversos e dingbats
-    "\U0001F1E6-\U0001F1FF"  # bandeiras (pares de letras regionais)
-    "\U00002700-\U000027BF"
-    "\U0001F900-\U0001F9FF"
-    "\U00002190-\U000021FF"  # setas (algumas usadas como emoji)
-    "\U0000FE0F"             # variation selector (modificador de emoji)
-    "]+",
-    flags=re.UNICODE
-)
-
-
-def strip_emoji(text):
-    """Remove emojis do texto - a fonte usada (Poppins) nao tem esses
-    glifos, entao o ffmpeg nao consegue desenhar e ou falha ou mostra
-    uma caixa vazia no lugar."""
-    if not text:
-        return text
-    return EMOJI_PATTERN.sub('', text)
-
-
 def apply_caption(input_path, workdir, caption_text, align):
     """
     Aplica uma legenda (texto + posicao) seguindo as 4 posicoes seguras
@@ -202,11 +178,15 @@ def apply_caption(input_path, workdir, caption_text, align):
     O tamanho da fonte e calculado dinamicamente com base no numero de
     linhas do texto, para textos longos (ex: tabela de tamanhos) nunca
     estourarem a altura do video.
+
+    Nota: a fonte TikTok Sans, assim como a maioria das fontes de texto,
+    nao tem desenhos de emoji coloridos - caracteres de emoji no texto
+    podem aparecer como uma caixa vazia (tofu) no video.
     """
     if not caption_text:
         return input_path
 
-    caption_text = strip_emoji(caption_text).strip()
+    caption_text = caption_text.strip()
     if not caption_text:
         return input_path
 
