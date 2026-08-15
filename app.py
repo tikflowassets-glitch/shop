@@ -360,8 +360,6 @@ def upload_raw():
     dest = os.path.join(RAW_DIR, filename)
     request.files['video'].save(dest)
 
-    compress_if_needed(dest, video_id)
-
     try:
         duration = get_duration(dest)
     except Exception:
@@ -442,8 +440,6 @@ def upload_complete():
         return jsonify({"error": f"falha ao remontar arquivo: {e}"}), 500
     finally:
         shutil.rmtree(upload_dir, ignore_errors=True)
-
-    compress_if_needed(dest, video_id)
 
     try:
         duration = get_duration(dest)
