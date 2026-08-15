@@ -7,6 +7,7 @@ import uuid
 
 from flask import Flask, request, send_file, jsonify, after_this_request, abort
 from flask_cors import CORS
+from PIL import ImageFont
 
 app = Flask(__name__)
 CORS(app)  # permite chamadas do frontend (Vercel) para este servidor
@@ -213,12 +214,26 @@ def apply_caption(input_path, workdir, caption_text, align):
     max_block_height = video_height * 0.72
     fontsize_by_height = int(max_block_height / effective_lines)
 
-    # orcamento de LARGURA - a linha mais comprida do texto nao pode estourar
-    # os lados do video. Aproximacao mais conservadora (a anterior ainda
-    # deixava estourar): fonte bold larga por caractere ~0.72x o tamanho
-    max_line_len = max((len(ln) for ln in content_lines), default=1)
-    max_block_width = video_width * 0.68
-    fontsize_by_width = int(max_block_width / (max_line_len * 0.72))
+    # orcamento de LARGURA - mede o texto na fonte REAL (nao estimativa),
+    # e considera a POSICAO horizontal de verdade: quando alinhado a
+    # direita, o texto fica centrado em 76% da largura, entao so sobra
+    # ~24% de espaco livre ate a borda - nao os ~68% que usavamos antes
+    longest_line = max(content_lines, key=len, default='')
+    if longest_line:
+        trial_size = 60
+        trial_font = ImageFont.truetype(FONT_BOLD, trial_size)
+        bbox = trial_font.getbbox(longest_line)
+        measured_width_at_trial = max(1, bbox[2] - bbox[0])
+
+        if h == 'right':
+            # x = (w*0.76) - (tw/2) -> borda direita = 0.76w + tw/2 <= w -> tw <= 0.48w
+            available_width = video_width * 0.44  # com margem de seguranca
+        else:
+            available_width = video_width * 0.85
+
+        fontsize_by_width = int(trial_size * (available_width / measured_width_at_trial))
+    else:
+        fontsize_by_width = fontsize_by_height
 
     # usa o menor dos dois (o que for mais restritivo), com piso/teto
     # proporcionais a altura do video para nunca ficar minusculo nem gigante
