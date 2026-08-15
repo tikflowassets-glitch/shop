@@ -198,15 +198,20 @@ def apply_caption(input_path, workdir, caption_text, align):
              '-show_entries', 'stream=height', '-of', 'csv=p=0', input_path])
     video_height = int(r.stdout.strip().split(',')[0])
 
-    lines = [ln for ln in caption_text.split('\n')]
-    n_lines = max(1, len(lines))
+    lines = caption_text.split('\n')
+    content_lines = [ln for ln in lines if ln.strip() != '']
+    blank_lines = len(lines) - len(content_lines)
+    n_content = max(1, len(content_lines))
+    # linhas em branco (separadores entre blocos) ocupam so metade da altura
+    # de uma linha de texto normal - nao devem encolher a fonte a toa
+    effective_lines = n_content + blank_lines * 0.5
 
     # orcamento de altura disponivel para o bloco de texto (evita as faixas
     # de UI do TikTok: ~10% topo, ~18% base, ~17% coluna direita)
-    max_block_height = video_height * 0.60
-    raw_fontsize = int(max_block_height / n_lines)
-    fontsize = max(16, min(26, raw_fontsize - 4))
-    line_spacing = max(2, fontsize // 5)
+    max_block_height = video_height * 0.65
+    raw_fontsize = int(max_block_height / effective_lines)
+    fontsize = max(20, min(30, raw_fontsize - 4))
+    line_spacing = max(3, fontsize // 4)
 
     x_map = {
         'center': '(w-tw)/2',
