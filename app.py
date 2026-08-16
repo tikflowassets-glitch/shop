@@ -565,8 +565,13 @@ def process_stored():
 
     video_path = _safe_join(DATA_DIR, raw_video_path)
     music_path = _safe_join(DATA_DIR, music_path_rel)
-    if not os.path.isfile(video_path) or not os.path.isfile(music_path):
-        return jsonify({"error": "raw_video_path ou music_path nao encontrado no volume"}), 404
+    missing = []
+    if not os.path.isfile(video_path):
+        missing.append({"campo": "raw_video_path", "caminho": raw_video_path})
+    if not os.path.isfile(music_path):
+        missing.append({"campo": "music_path", "caminho": music_path_rel})
+    if missing:
+        return jsonify({"error": "arquivo(s) nao encontrado(s) no volume", "faltando": missing}), 404
 
     beats_per_cut = int(data.get('beats_per_cut', 2))
     reorder_mode = data.get('reorder_mode', 'half')
