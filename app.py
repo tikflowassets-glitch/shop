@@ -13,6 +13,7 @@ app = Flask(__name__)
 CORS(app)  # permite chamadas do frontend (Vercel) para este servidor
 
 FONT_BOLD = "/usr/share/fonts/truetype/tiktoksans/TikTokSans-Bold.ttf"
+FONT_REGULAR = "/usr/share/fonts/truetype/tiktoksans/TikTokSans-Regular.ttf"
 
 # volume persistente montado no EasyPanel (sobrevive a restart/redeploy)
 DATA_DIR = "/data/shop-videos"
@@ -249,7 +250,7 @@ def apply_caption(input_path, workdir, caption_text, align):
     longest_line = max(content_lines, key=len, default='')
     if longest_line:
         trial_size = 60
-        trial_font = ImageFont.truetype(FONT_BOLD, trial_size)
+        trial_font = ImageFont.truetype(FONT_REGULAR, trial_size)
         bbox = trial_font.getbbox(longest_line)
         measured_width_at_trial = max(1, bbox[2] - bbox[0])
 
@@ -296,7 +297,7 @@ def apply_caption(input_path, workdir, caption_text, align):
         f.write(caption_text)
 
     filt = (
-        f"drawtext=fontfile='{FONT_BOLD}':textfile='{text_file}':"
+        f"drawtext=fontfile='{FONT_REGULAR}':textfile='{text_file}':"
         f"fontcolor=white:fontsize={fontsize}:line_spacing={line_spacing}:bordercolor=black:borderw={border_width}:"
         f"x={x_expr}:y={y_expr}"
     )
