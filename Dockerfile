@@ -24,6 +24,14 @@ RUN pip install --no-cache-dir --break-system-packages fonttools && \
     rm /tmp/TikTokSansVariable.ttf && \
     fc-cache -f
 
+# Noto Color Emoji (Google, open-source) - a TikTok Sans nao tem desenhos de
+# emoji coloridos, entao usamos essa fonte separada so pros caracteres de
+# emoji na legenda (composta via PIL, nao via drawtext do ffmpeg)
+RUN mkdir -p /usr/share/fonts/truetype/notoemoji && \
+    curl -sL "https://raw.githubusercontent.com/googlefonts/noto-emoji/main/fonts/NotoColorEmoji.ttf" \
+      -o /usr/share/fonts/truetype/notoemoji/NotoColorEmoji.ttf && \
+    fc-cache -f
+
 WORKDIR /app
 
 COPY requirements.txt .
