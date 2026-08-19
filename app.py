@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -7,13 +8,31 @@ import uuid
 
 from flask import Flask, request, send_file, jsonify, after_this_request, abort
 from flask_cors import CORS
-from PIL import ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
 CORS(app)  # permite chamadas do frontend (Vercel) para este servidor
 
 FONT_BOLD = "/usr/share/fonts/truetype/tiktoksans/TikTokSans-Bold.ttf"
 FONT_REGULAR = "/usr/share/fonts/truetype/tiktoksans/TikTokSans-Regular.ttf"
+FONT_EMOJI = "/usr/share/fonts/truetype/notoemoji/NotoColorEmoji.ttf"
+
+# a Noto Color Emoji so tem glifos coloridos num unico tamanho fixo (109px) -
+# qualquer ImageFont.truetype(FONT_EMOJI, outro_tamanho) e redimensionado
+# depois via PIL (perde nitidez em tamanhos muito diferentes, mas funciona)
+EMOJI_NATIVE_SIZE = 109
+
+EMOJI_PATTERN = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002B00-\U00002BFF"
+    "\U00002300-\U000023FF"
+    "\U0000FE0F"
+    "\U0000200D"
+    "]+"
+)
 
 # volume persistente montado no EasyPanel (sobrevive a restart/redeploy)
 DATA_DIR = "/data/shop-videos"
@@ -289,24 +308,118 @@ def apply_caption(input_path, workdir, caption_text, align):
         'center': '(h-th)/2',
         'bottom': 'h*0.80-th/2',
     }
-    x_expr = x_map.get(h, '(w-tw)/2')
-    y_expr = y_map.get(v, '(h-th)/2')
 
-    text_file = os.path.join(workdir, 'caption.txt')
-    with open(text_file, 'w') as f:
-        f.write(caption_text)
+    caption_png = _render_caption_png(caption_text, fontsize, line_spacing, border_width, h)
+    png_path = os.path.join(workdir, 'caption.png')
+    caption_png.save(png_path)
+    tw, th = caption_png.size
 
-    filt = (
-        f"drawtext=fontfile='{FONT_REGULAR}':textfile='{text_file}':"
-        f"fontcolor=white:fontsize={fontsize}:line_spacing={line_spacing}:bordercolor=black:borderw={border_width}:"
-        f"x={x_expr}:y={y_expr}"
-    )
+    # calcula a posicao em pixels (nao precisa mais das expressoes tw/th do
+    # ffmpeg - ja sabemos o tamanho exato da imagem que o PIL desenhou)
+    x_px = {
+        'center': (video_width - tw) // 2,
+        'right': int(video_width * 0.76 - tw / 2),
+    }.get(h, (video_width - tw) // 2)
+    y_px = {
+        'top': int(video_height * 0.12 - th / 2),
+        'center': (video_height - th) // 2,
+        'bottom': int(video_height * 0.80 - th / 2),
+    }.get(v, (video_height - th) // 2)
 
     out = os.path.join(workdir, 'texted.mp4')
-    run(['ffmpeg', '-y', '-i', input_path, '-vf', filt,
+    run(['ffmpeg', '-y', '-i', input_path, '-i', png_path,
+         '-filter_complex', f"[0:v][1:v]overlay={x_px}:{y_px}",
          '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-threads', '2',
          '-c:a', 'copy', out])
     return out
+
+
+def _split_emoji_runs(text):
+    """Quebra uma linha em pedacos alternados de texto normal e emoji,
+    preservando a ordem. Ex: 'Chegou 🔥 hoje' -> [('Chegou ', False),
+    ('🔥', True), (' hoje', False)]"""
+    runs = []
+    pos = 0
+    for m in EMOJI_PATTERN.finditer(text):
+        if m.start() > pos:
+            runs.append((text[pos:m.start()], False))
+        runs.append((text[m.start():m.end()], True))
+        pos = m.end()
+    if pos < len(text):
+        runs.append((text[pos:], False))
+    return runs or [('', False)]
+
+
+def _render_caption_png(caption_text, fontsize, line_spacing, border_width, h_align):
+    """Desenha a legenda inteira (texto + emoji colorido) numa imagem PNG
+    transparente, respeitando alinhamento por linha (direita/centro).
+    O FFmpeg so precisa sobrepor essa imagem pronta no video (overlay),
+    nao desenhar texto - por isso emoji colorido funciona aqui e nao
+    funcionava com drawtext (que usa uma unica fonte sem cor)."""
+    text_font = ImageFont.truetype(FONT_REGULAR, fontsize)
+    emoji_font = ImageFont.truetype(FONT_EMOJI, EMOJI_NATIVE_SIZE)
+    emoji_scale = fontsize / EMOJI_NATIVE_SIZE
+
+    lines = caption_text.split('\n')
+    ascent, descent = text_font.getmetrics()
+    line_height = ascent + descent
+
+    # mede cada linha primeiro (largura total e os runs ja fatiados),
+    # pra saber a largura maxima do bloco antes de desenhar
+    measured_lines = []
+    max_line_width = 1
+    for line in lines:
+        if line.strip() == '':
+            measured_lines.append((0, []))
+            continue
+        runs = _split_emoji_runs(line)
+        run_widths = []
+        total_w = 0
+        for text, is_emoji in runs:
+            if not text:
+                continue
+            if is_emoji:
+                w = int(emoji_font.getbbox(text)[2] * emoji_scale)
+            else:
+                bbox = text_font.getbbox(text)
+                w = bbox[2] - bbox[0]
+            run_widths.append((text, is_emoji, w))
+            total_w += w
+        measured_lines.append((total_w, run_widths))
+        max_line_width = max(max_line_width, total_w)
+
+    n_lines = len(lines)
+    total_height = int(n_lines * line_height + max(0, n_lines - 1) * line_spacing)
+    pad = border_width + 4  # margem pra borda/contorno nao cortar nas bordas da imagem
+    img = Image.new('RGBA', (max_line_width + pad * 2, total_height + pad * 2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    y = pad
+    for total_w, run_widths in measured_lines:
+        if h_align == 'right':
+            x = pad + (max_line_width - total_w)
+        elif h_align == 'center':
+            x = pad + (max_line_width - total_w) // 2
+        else:
+            x = pad
+        for text, is_emoji, w in run_widths:
+            if is_emoji:
+                if emoji_scale != 1.0:
+                    glyph = Image.new('RGBA', (EMOJI_NATIVE_SIZE * len(text) + 20, EMOJI_NATIVE_SIZE + 20), (0, 0, 0, 0))
+                    gdraw = ImageDraw.Draw(glyph)
+                    gdraw.text((0, 0), text, font=emoji_font, embedded_color=True)
+                    new_size = (max(1, int(glyph.width * emoji_scale)), max(1, int(glyph.height * emoji_scale)))
+                    glyph = glyph.resize(new_size, Image.LANCZOS)
+                    img.alpha_composite(glyph, (int(x), int(y + (line_height - glyph.height))))
+                else:
+                    draw.text((x, y), text, font=emoji_font, embedded_color=True)
+            else:
+                draw.text((x, y), text, font=text_font, fill='white',
+                          stroke_width=border_width, stroke_fill='black')
+            x += w
+        y += line_height + line_spacing
+
+    return img
 
 
 @app.route('/health', methods=['GET'])
