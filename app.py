@@ -238,7 +238,9 @@ def apply_caption(input_path, workdir, caption_text, align):
     # usa o menor dos dois (o que for mais restritivo), com piso/teto
     # proporcionais a altura do video para nunca ficar minusculo nem gigante
     min_fontsize = int(video_height * 0.020)
-    max_fontsize = int(video_height * 0.045)
+    # teto reduzido - legendas curtas (1-2 linhas) nao tem restricao de altura,
+    # entao sem esse teto mais baixo elas ficam grandes demais (pedido explicito)
+    max_fontsize = int(video_height * 0.035)
     fontsize = max(min_fontsize, min(max_fontsize, fontsize_by_height, fontsize_by_width))
     # reduz o tamanho final da fonte (pedido explicito - letra grande demais).
     # ajustar esse multiplicador pra mais/menos conforme feedback visual.
