@@ -36,6 +36,31 @@ def get_duration(path):
     return float(r.stdout.strip())
 
 
+def get_video_info(path):
+    """Le resolucao e fps reais do arquivo (ja considerando rotacao, se o
+    ffprobe reportar side_data) - guardado no upload pra podermos comparar
+    depois se um lote saiu com qualidade pior que o esperado."""
+    r = run(['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+             '-show_entries', 'stream=width,height,r_frame_rate',
+             '-of', 'default=noprint_wrappers=1', path])
+    info = {}
+    for line in r.stdout.strip().splitlines():
+        if '=' not in line:
+            continue
+        key, val = line.split('=', 1)
+        info[key] = val
+    width = int(info.get('width', 0)) or None
+    height = int(info.get('height', 0)) or None
+    fps = None
+    if info.get('r_frame_rate') and '/' in info['r_frame_rate']:
+        num, den = info['r_frame_rate'].split('/')
+        try:
+            fps = round(float(num) / float(den), 2) if float(den) != 0 else None
+        except ValueError:
+            fps = None
+    return {"width": width, "height": height, "fps": fps}
+
+
 def analyze_music(music_path):
     """Roda a deteccao de batida uma unica vez e devolve dados serializaveis
     (bpm, timestamps, duracao) para guardar no banco (shop_music_bank)."""
@@ -421,10 +446,16 @@ def upload_raw():
     except Exception:
         duration = None
 
+    try:
+        video_info = get_video_info(dest)
+    except Exception:
+        video_info = {"width": None, "height": None, "fps": None}
+
     return jsonify({
         "id": video_id,
         "storage_path": f"raw/{filename}",
         "duration": duration,
+        **video_info,
     })
 
 
@@ -502,10 +533,16 @@ def upload_complete():
     except Exception:
         duration = None
 
+    try:
+        video_info = get_video_info(dest)
+    except Exception:
+        video_info = {"width": None, "height": None, "fps": None}
+
     return jsonify({
         "id": video_id,
         "storage_path": f"raw/{filename}",
         "duration": duration,
+        **video_info,
     })
 
 
