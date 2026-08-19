@@ -103,6 +103,7 @@ def cut_segments(video_path, segments, workdir):
         out = os.path.join(workdir, f'seg_{i:03d}.mp4')
         run(['ffmpeg', '-y', '-ss', str(s), '-i', video_path, '-t', str(dur),
              '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-an',
+             '-threads', '2',
              '-avoid_negative_ts', 'make_zero', out])
         paths.append(out)
     return paths
@@ -165,7 +166,9 @@ def apply_color_grade(input_path, workdir):
         "[shadow]unsharp=5:5:0.5:5:5:0.0[final]"
     )
     run(['ffmpeg', '-y', '-i', input_path, '-filter_complex', filt,
-         '-map', '[final]', '-map', '0:a', '-c:a', 'copy', out])
+         '-map', '[final]', '-map', '0:a',
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-threads', '2',
+         '-c:a', 'copy', out])
     return out
 
 
@@ -274,7 +277,9 @@ def apply_caption(input_path, workdir, caption_text, align):
     )
 
     out = os.path.join(workdir, 'texted.mp4')
-    run(['ffmpeg', '-y', '-i', input_path, '-vf', filt, '-c:a', 'copy', out])
+    run(['ffmpeg', '-y', '-i', input_path, '-vf', filt,
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-threads', '2',
+         '-c:a', 'copy', out])
     return out
 
 
@@ -538,7 +543,7 @@ def trim_video(video_path, workdir, start_offset, max_duration):
     e permitir que variacoes diferentes comecem em pontos diferentes do video."""
     out = os.path.join(workdir, 'trimmed_input.mp4')
     run(['ffmpeg', '-y', '-ss', str(start_offset), '-i', video_path, '-t', str(max_duration),
-         '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-threads', '2',
          '-avoid_negative_ts', 'make_zero', out])
     return out
 
