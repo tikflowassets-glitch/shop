@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir --break-system-packages fonttools && \
       -o /tmp/TikTokSansVariable.ttf && \
     fonttools varLib.instancer -o /usr/share/fonts/truetype/tiktoksans/TikTokSans-Bold.ttf \
       /tmp/TikTokSansVariable.ttf opsz=24 slnt=0 wdth=100 wght=700 && \
+    fonttools varLib.instancer -o /usr/share/fonts/truetype/tiktoksans/TikTokSans-Regular.ttf \
+      /tmp/TikTokSansVariable.ttf opsz=24 slnt=0 wdth=100 wght=400 && \
     rm /tmp/TikTokSansVariable.ttf && \
     fc-cache -f
 
