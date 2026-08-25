@@ -201,17 +201,35 @@ def mix_audio(video_no_audio, music_path, workdir, total_dur):
     return out
 
 
-def apply_color_grade(input_path, workdir):
+def apply_color_grade(input_path, workdir, mirror=False):
     out = os.path.join(workdir, 'graded.mp4')
-    filt = (
-        "[0:v]normalize[norm];"
-        "[0:v][norm]blend=all_mode=normal:all_opacity=0.8[auto];"
-        "[auto]eq=brightness=0.05:contrast=1.07:saturation=0.90[eq];"
-        "[eq]curves=master='0/0 0.2/0.17 1/1'[shadow];"
-        "[shadow]unsharp=5:5:0.5:5:5:0.0[final]"
-    )
+    if mirror:
+        filt = (
+            "[0:v]hflip,split=2[src1][src2];"
+            "[src1]normalize[norm];"
+            "[src2][norm]blend=all_mode=normal:all_opacity=0.8[auto];"
+            "[auto]eq=brightness=0.05:contrast=1.07:saturation=0.90[eq];"
+            "[eq]curves=master='0/0 0.2/0.17 1/1'[shadow];"
+            "[shadow]unsharp=5:5:0.5:5:5:0.0[final]"
+        )
+    else:
+        filt = (
+            "[0:v]normalize[norm];"
+            "[0:v][norm]blend=all_mode=normal:all_opacity=0.8[auto];"
+            "[auto]eq=brightness=0.05:contrast=1.07:saturation=0.90[eq];"
+            "[eq]curves=master='0/0 0.2/0.17 1/1'[shadow];"
+            "[shadow]unsharp=5:5:0.5:5:5:0.0[final]"
+        )
     run(['ffmpeg', '-y', '-i', input_path, '-filter_complex', filt,
          '-map', '[final]', '-map', '0:a',
+         '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-threads', '2',
+         '-c:a', 'copy', out])
+    return out
+
+
+def apply_mirror(input_path, workdir):
+    out = os.path.join(workdir, 'mirrored.mp4')
+    run(['ffmpeg', '-y', '-i', input_path, '-vf', 'hflip',
          '-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-threads', '2',
          '-c:a', 'copy', out])
     return out
@@ -735,6 +753,7 @@ def process_stored():
     reorder_mode = data.get('reorder_mode', 'half')
     num_blocks = int(data.get('num_blocks', 3))
     color_grade = bool(data.get('color_grade', True))
+    mirror = bool(data.get('mirror', False))
     caption_text = data.get('caption_text')
     caption_align = data.get('caption_align')
     beat_timestamps = data.get('beat_timestamps')
@@ -769,7 +788,9 @@ def process_stored():
         current = mix_audio(video_no_audio, music_path, workdir, total_dur)
 
         if color_grade:
-            current = apply_color_grade(current, workdir)
+            current = apply_color_grade(current, workdir, mirror=mirror)
+        elif mirror:
+            current = apply_mirror(current, workdir)
         if caption_text:
             current = apply_caption(current, workdir, caption_text, caption_align)
 
