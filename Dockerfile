@@ -43,4 +43,4 @@ EXPOSE 5000
 
 # timeout alto porque processamento de video sem compressao pode demorar bastante
 # (deteccao de batida + varios passos de ffmpeg em video de alta resolucao)
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "1200", "app:app"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "1800", "app:app"]
