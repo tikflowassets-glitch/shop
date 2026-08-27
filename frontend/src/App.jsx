@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
-import { Upload, Tag, Video, Users, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft, X, Music } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Upload, Tag, Video, Users, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft, X, Music, Play, Pause } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
 const PROCESSOR_URL = import.meta.env.VITE_PROCESSOR_URL;
@@ -94,6 +94,8 @@ export default function App() {
 
   const [musicFile, setMusicFile] = useState(null);
   const [uploadingMusic, setUploadingMusic] = useState(false);
+  const [playingMusicId, setPlayingMusicId] = useState(null);
+  const audioRef = useRef(null);
 
   const [captionSearch, setCaptionSearch] = useState("");
   const [editingCaption, setEditingCaption] = useState(null);
@@ -105,6 +107,19 @@ export default function App() {
   const [accDraft, setAccDraft] = useState({ tiktok_username: "", profile_url: "", description: "", status: "active", session_json: "", post_times: [] });
   const [newTimeInput, setNewTimeInput] = useState("");
   const [savingAccount, setSavingAccount] = useState(false);
+
+  function togglePlayMusic(m) {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playingMusicId === m.id) {
+      audio.pause();
+      setPlayingMusicId(null);
+      return;
+    }
+    audio.src = `${PROCESSOR_URL}/videos/${m.storage_path}`;
+    audio.play().catch(() => setPlayingMusicId(null));
+    setPlayingMusicId(m.id);
+  }
 
   async function handleUploadMusic() {
     if (!musicFile || !PROCESSOR_URL) return;
@@ -143,6 +158,10 @@ export default function App() {
   async function handleDeleteMusic(m) {
     if (!window.confirm(`Apagar "${m.name || m.storage_path}"? Isso remove o arquivo do servidor e o registro definitivamente.`)) return;
     try {
+      if (playingMusicId === m.id && audioRef.current) {
+        audioRef.current.pause();
+        setPlayingMusicId(null);
+      }
       if (m.storage_path) {
         await fetch(`${PROCESSOR_URL}/videos/${m.storage_path}`, { method: "DELETE" });
       }
@@ -629,13 +648,24 @@ export default function App() {
                   {uploadingMusic ? "Enviando e analisando batida..." : "Enviar música"}
                 </button>
 
+                <audio
+                  ref={audioRef}
+                  onEnded={() => setPlayingMusicId(null)}
+                  onPause={() => setPlayingMusicId(null)}
+                  style={{ display: "none" }}
+                />
+
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {music.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhuma música cadastrada ainda.</p>}
                   {music.map((m) => (
                     <div key={m.id} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <Music size={14} color={C.accentText} />
-                      </div>
+                      <button
+                        onClick={() => togglePlayMusic(m)}
+                        style={{ width: 32, height: 32, borderRadius: 8, background: C.accentSoft, border: "none", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}
+                        title={playingMusicId === m.id ? "Pausar" : "Tocar"}
+                      >
+                        {playingMusicId === m.id ? <Pause size={14} color={C.accentText} /> : <Play size={14} color={C.accentText} />}
+                      </button>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name || m.storage_path?.split("/").pop()}</div>
                         <div style={{ fontSize: 10.5, color: C.sub }}>{m.bpm ? `${m.bpm} BPM · ` : ""}{m.duration ? `${Math.round(m.duration)}s` : ""}</div>
