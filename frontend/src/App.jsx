@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Upload, Tag, Video, Users, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft, X } from "lucide-react";
+import { Upload, Tag, Video, Users, Plus, Check, Trash2, Pencil, Search, Film, ChevronLeft, X, Music } from "lucide-react";
 import { supabase } from "./supabaseClient.js";
 
 const PROCESSOR_URL = import.meta.env.VITE_PROCESSOR_URL;
@@ -92,6 +92,9 @@ export default function App() {
   const [successMsg, setSuccessMsg] = useState(null);
   // (geracao das variacoes agora roda via workflow do n8n, nao mais no navegador)
 
+  const [musicFile, setMusicFile] = useState(null);
+  const [uploadingMusic, setUploadingMusic] = useState(false);
+
   const [captionSearch, setCaptionSearch] = useState("");
   const [editingCaption, setEditingCaption] = useState(null);
   const [capDraft, setCapDraft] = useState("");
@@ -102,6 +105,54 @@ export default function App() {
   const [accDraft, setAccDraft] = useState({ tiktok_username: "", profile_url: "", description: "", status: "active", session_json: "", post_times: [] });
   const [newTimeInput, setNewTimeInput] = useState("");
   const [savingAccount, setSavingAccount] = useState(false);
+
+  async function handleUploadMusic() {
+    if (!musicFile || !PROCESSOR_URL) return;
+    setUploadingMusic(true);
+    setErrorMsg(null);
+    try {
+      const form = new FormData();
+      form.append("music", musicFile);
+      const res = await fetch(`${PROCESSOR_URL}/upload-music`, { method: "POST", body: form });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Falha ao enviar música (${res.status})`);
+      }
+      const data = await res.json();
+
+      const { error: insertError } = await supabase.from("shop_music_bank").insert({
+        name: musicFile.name,
+        storage_path: data.storage_path,
+        bpm: data.bpm,
+        duration: data.duration,
+        beat_timestamps: data.beat_timestamps,
+        active: true,
+      });
+      if (insertError) throw insertError;
+
+      setMusicFile(null);
+      setSuccessMsg(`Música "${musicFile.name}" enviada.`);
+      loadData();
+    } catch (e) {
+      setErrorMsg(e.message);
+    } finally {
+      setUploadingMusic(false);
+    }
+  }
+
+  async function handleDeleteMusic(m) {
+    if (!window.confirm(`Apagar "${m.name || m.storage_path}"? Isso remove o arquivo do servidor e o registro definitivamente.`)) return;
+    try {
+      if (m.storage_path) {
+        await fetch(`${PROCESSOR_URL}/videos/${m.storage_path}`, { method: "DELETE" });
+      }
+      const { error } = await supabase.from("shop_music_bank").delete().eq("id", m.id);
+      if (error) throw error;
+      setMusic((prev) => prev.filter((x) => x.id !== m.id));
+    } catch (e) {
+      setErrorMsg(`Falha ao apagar: ${e.message}`);
+    }
+  }
 
   async function handleDeleteVideo(v) {
     const displayName = v.original_filename || v.storage_path?.split("/").pop() || v.id;
@@ -545,6 +596,59 @@ export default function App() {
               </div>
             )}
 
+            {tab === "music" && (
+              <div>
+                <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Músicas</h2>
+                <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 14px" }}>{music.length} cadastradas · usadas nas variações geradas.</p>
+
+                <label
+                  style={{
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6,
+                    border: musicFile ? `1.5px solid ${C.accent}` : `1.5px dashed ${C.border}`,
+                    background: musicFile ? C.accentSoft : "transparent", borderRadius: 12, padding: "20px 12px",
+                    cursor: "pointer", marginBottom: 10,
+                  }}
+                >
+                  <input type="file" accept="audio/*" style={{ display: "none" }} onChange={(e) => setMusicFile(e.target.files?.[0] || null)} />
+                  <Upload size={19} color={musicFile ? C.accentText : "#b5b1a6"} />
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: musicFile ? C.accentText : C.sub, textAlign: "center", wordBreak: "break-all" }}>
+                    {musicFile ? musicFile.name : "Toque para escolher a música"}
+                  </span>
+                </label>
+
+                <button
+                  onClick={handleUploadMusic}
+                  disabled={!musicFile || uploadingMusic || !PROCESSOR_URL}
+                  style={{
+                    width: "100%", boxSizing: "border-box", padding: "11px 0", borderRadius: 10, border: "none",
+                    background: !musicFile || uploadingMusic || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
+                    color: !musicFile || uploadingMusic || !PROCESSOR_URL ? "#a8a498" : "#fff",
+                    fontSize: 13, fontWeight: 600, cursor: !musicFile || uploadingMusic ? "not-allowed" : "pointer", marginBottom: 18,
+                  }}
+                >
+                  {uploadingMusic ? "Enviando e analisando batida..." : "Enviar música"}
+                </button>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {music.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhuma música cadastrada ainda.</p>}
+                  {music.map((m) => (
+                    <div key={m.id} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Music size={14} color={C.accentText} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name || m.storage_path?.split("/").pop()}</div>
+                        <div style={{ fontSize: 10.5, color: C.sub }}>{m.bpm ? `${m.bpm} BPM · ` : ""}{m.duration ? `${Math.round(m.duration)}s` : ""}</div>
+                      </div>
+                      <button onClick={() => handleDeleteMusic(m)} style={{ background: "#f3e9e6", border: "none", borderRadius: 7, width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}>
+                        <Trash2 size={12} color="#a3766b" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {tab === "captions" && editingCaption && (
               <div>
                 <button onClick={() => setEditingCaption(null)} style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: C.sub, fontSize: 12.5, fontWeight: 600, cursor: "pointer", marginBottom: 14, padding: 0 }}>
@@ -785,6 +889,7 @@ export default function App() {
         {[
           { id: "upload", label: "Enviar", icon: Upload },
           { id: "captions", label: "Legendas", icon: Tag },
+          { id: "music", label: "Músicas", icon: Music },
           { id: "accounts", label: "Contas", icon: Users },
           { id: "videos", label: "Vídeos", icon: Video },
         ].map((t) => {
