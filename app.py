@@ -39,7 +39,8 @@ DATA_DIR = "/data/shop-videos"
 RAW_DIR = os.path.join(DATA_DIR, "raw")
 PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 MUSIC_DIR = os.path.join(DATA_DIR, "music")
-for d in (RAW_DIR, PROCESSED_DIR, MUSIC_DIR):
+THUMBS_DIR = os.path.join(DATA_DIR, "thumbnails")
+for d in (RAW_DIR, PROCESSED_DIR, MUSIC_DIR, THUMBS_DIR):
     os.makedirs(d, exist_ok=True)
 
 
@@ -54,6 +55,22 @@ def get_duration(path):
     r = run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
              '-of', 'default=noprint_wrappers=1:nokey=1', path])
     return float(r.stdout.strip())
+
+
+def generate_thumbnail(video_path, video_id, duration=None):
+    """Extrai um frame do meio do video (nao o primeiro, que costuma sair
+    preto/borrado) e salva como thumbnails/<video_id>.jpg. Retorna o path
+    relativo (para storage_path) ou None se falhar - nunca derruba o
+    upload por causa da miniatura."""
+    try:
+        seek = (duration / 2) if duration else 1
+        thumb_filename = f"{video_id}.jpg"
+        thumb_dest = os.path.join(THUMBS_DIR, thumb_filename)
+        run(['ffmpeg', '-y', '-ss', str(seek), '-i', video_path,
+             '-frames:v', '1', '-vf', 'scale=320:-1', thumb_dest])
+        return f"thumbnails/{thumb_filename}"
+    except Exception:
+        return None
 
 
 def get_video_info(path):
@@ -583,10 +600,13 @@ def upload_raw():
     except Exception:
         video_info = {"width": None, "height": None, "fps": None}
 
+    thumbnail_path = generate_thumbnail(dest, video_id, duration)
+
     return jsonify({
         "id": video_id,
         "storage_path": f"raw/{filename}",
         "duration": duration,
+        "thumbnail_path": thumbnail_path,
         **video_info,
     })
 
@@ -670,15 +690,15 @@ def upload_complete():
     except Exception:
         video_info = {"width": None, "height": None, "fps": None}
 
+    thumbnail_path = generate_thumbnail(dest, video_id, duration)
+
     return jsonify({
         "id": video_id,
         "storage_path": f"raw/{filename}",
         "duration": duration,
+        "thumbnail_path": thumbnail_path,
         **video_info,
     })
-
-
-@app.route('/upload-music', methods=['POST'])
 def upload_music():
     """
     Recebe uma musica nova (multipart/form-data, campo 'music'), roda a
