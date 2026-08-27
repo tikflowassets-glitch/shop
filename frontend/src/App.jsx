@@ -207,6 +207,8 @@ export default function App() {
         width: uploadData.width,
         height: uploadData.height,
         fps: uploadData.fps,
+        thumbnail_path: uploadData.thumbnail_path,
+        original_filename: videoFile.name,
         caption_ids: selectedCaptions,
         status: "pending",
         uploaded_by: "sergio",
@@ -725,11 +727,19 @@ export default function App() {
                     const s = statusMap[v.status] || statusMap.pending;
                     return (
                       <div key={v.id} style={{ border: `1px solid ${C.border}`, background: C.card, borderRadius: 10, padding: 12, display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accentSoft, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {v.thumbnail_path ? (
+                          <img
+                            src={`${PROCESSOR_URL}/videos/${v.thumbnail_path}`}
+                            alt=""
+                            style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
+                            onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.nextSibling.style.display = "flex"; }}
+                          />
+                        ) : null}
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: C.accentSoft, display: v.thumbnail_path ? "none" : "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                           <Video size={14} color={C.accentText} />
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.storage_path?.split("/").pop() || v.id}</div>
+                          <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v.original_filename || v.storage_path?.split("/").pop() || v.id}</div>
                           <div style={{ fontSize: 10.5, color: C.sub }}>{v.times_used || 0}/{v.max_uses || 4} variações · {new Date(v.created_at).toLocaleDateString("pt-BR")}</div>
                         </div>
                         <div style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: s.bg, color: s.color, flexShrink: 0 }}>
