@@ -103,6 +103,25 @@ export default function App() {
   const [newTimeInput, setNewTimeInput] = useState("");
   const [savingAccount, setSavingAccount] = useState(false);
 
+  async function handleDeleteVideo(v) {
+    const displayName = v.original_filename || v.storage_path?.split("/").pop() || v.id;
+    if (!window.confirm(`Apagar "${displayName}"? Isso remove o arquivo do servidor e o registro definitivamente.`)) return;
+
+    try {
+      if (v.storage_path) {
+        await fetch(`${PROCESSOR_URL}/videos/${v.storage_path}`, { method: "DELETE" });
+      }
+      if (v.thumbnail_path) {
+        await fetch(`${PROCESSOR_URL}/videos/${v.thumbnail_path}`, { method: "DELETE" });
+      }
+      const { error } = await supabase.from("shop_videos").delete().eq("id", v.id);
+      if (error) throw error;
+      setVideos((prev) => prev.filter((x) => x.id !== v.id));
+    } catch (e) {
+      setErrorMsg(`Falha ao apagar: ${e.message}`);
+    }
+  }
+
   async function loadData() {
     setLoading(true);
     setErrorMsg(null);
@@ -745,6 +764,13 @@ export default function App() {
                         <div style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 20, background: s.bg, color: s.color, flexShrink: 0 }}>
                           {s.label}
                         </div>
+                        <button
+                          onClick={() => handleDeleteVideo(v)}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 4, flexShrink: 0, display: "flex", alignItems: "center" }}
+                          title="Apagar vídeo"
+                        >
+                          <Trash2 size={14} color={C.sub} />
+                        </button>
                       </div>
                     );
                   })}
