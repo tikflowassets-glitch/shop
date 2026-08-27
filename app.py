@@ -699,6 +699,9 @@ def upload_complete():
         "thumbnail_path": thumbnail_path,
         **video_info,
     })
+
+
+@app.route('/upload-music', methods=['POST'])
 def upload_music():
     """
     Recebe uma musica nova (multipart/form-data, campo 'music'), roda a
