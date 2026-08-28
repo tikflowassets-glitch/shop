@@ -861,18 +861,28 @@ export default function App() {
                 <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Meus vídeos</h2>
                 <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 16px" }}>Resumo de tudo que já foi processado.</p>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }}>
-                  {[
-                    { label: "Prontos p/ postar", count: videos.filter((v) => v.kind === "processed" && v.status === "ready").length, color: "#6b8a6f", bg: "#eaf0e9" },
-                    { label: "Postados", count: videos.filter((v) => v.status === "posted").length, color: "#6b7f8a", bg: "#e9eef0" },
-                    { label: "Falharam", count: videos.filter((v) => v.status === "failed").length, color: "#a3766b", bg: "#f3e9e6" },
-                  ].map((s) => (
-                    <div key={s.label} style={{ background: s.bg, borderRadius: 10, padding: "10px 10px" }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.count}</div>
-                      <div style={{ fontSize: 10, color: s.color, marginTop: 2, lineHeight: 1.3 }}>{s.label}</div>
+                {(() => {
+                  const readyVideos = videos.filter((v) => v.kind === "processed" && v.status === "ready");
+                  const activeAccounts = accounts.filter((a) => a.status === "active");
+                  const perAccount = activeAccounts.map((a) => ({
+                    label: a.tiktok_username,
+                    count: readyVideos.filter((v) => v.assigned_account_id === a.id).length,
+                  }));
+                  const semConta = readyVideos.filter((v) => !v.assigned_account_id || !activeAccounts.some((a) => a.id === v.assigned_account_id)).length;
+                  const cards = [...perAccount];
+                  if (semConta > 0) cards.push({ label: "Sem conta", count: semConta });
+                  cards.push({ label: "Total", count: readyVideos.length, isTotal: true });
+                  return (
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(cards.length, 4)}, 1fr)`, gap: 8, marginBottom: 20 }}>
+                      {cards.map((s) => (
+                        <div key={s.label} style={{ background: s.isTotal ? C.accentSoft : "#eaf0e9", borderRadius: 10, padding: "10px 10px" }}>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: s.isTotal ? C.accentText : "#6b8a6f" }}>{s.count}</div>
+                          <div style={{ fontSize: 10, color: s.isTotal ? C.accentText : "#6b8a6f", marginTop: 2, lineHeight: 1.3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.label}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  );
+                })()}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {videos.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhum vídeo enviado ainda.</p>}
