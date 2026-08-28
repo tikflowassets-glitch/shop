@@ -869,9 +869,8 @@ export default function App() {
                     count: readyVideos.filter((v) => v.assigned_account_id === a.id).length,
                   }));
                   const semConta = readyVideos.filter((v) => !v.assigned_account_id || !activeAccounts.some((a) => a.id === v.assigned_account_id)).length;
-                  const cards = [...perAccount];
+                  const cards = [{ label: "Total", count: readyVideos.length, isTotal: true }, ...perAccount];
                   if (semConta > 0) cards.push({ label: "Sem conta", count: semConta });
-                  cards.push({ label: "Total", count: readyVideos.length, isTotal: true });
                   return (
                     <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(cards.length, 4)}, 1fr)`, gap: 8, marginBottom: 20 }}>
                       {cards.map((s) => (
