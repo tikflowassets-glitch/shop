@@ -162,11 +162,11 @@ export default function App() {
         audioRef.current.pause();
         setPlayingMusicId(null);
       }
+      const { error } = await supabase.from("shop_music_bank").delete().eq("id", m.id);
+      if (error) throw error;
       if (m.storage_path) {
         await fetch(`${PROCESSOR_URL}/videos/${m.storage_path}`, { method: "DELETE" });
       }
-      const { error } = await supabase.from("shop_music_bank").delete().eq("id", m.id);
-      if (error) throw error;
       setMusic((prev) => prev.filter((x) => x.id !== m.id));
     } catch (e) {
       setErrorMsg(`Falha ao apagar: ${e.message}`);
@@ -178,14 +178,14 @@ export default function App() {
     if (!window.confirm(`Apagar "${displayName}"? Isso remove o arquivo do servidor e o registro definitivamente.`)) return;
 
     try {
+      const { error } = await supabase.from("shop_videos").delete().eq("id", v.id);
+      if (error) throw error;
       if (v.storage_path) {
         await fetch(`${PROCESSOR_URL}/videos/${v.storage_path}`, { method: "DELETE" });
       }
       if (v.thumbnail_path) {
         await fetch(`${PROCESSOR_URL}/videos/${v.thumbnail_path}`, { method: "DELETE" });
       }
-      const { error } = await supabase.from("shop_videos").delete().eq("id", v.id);
-      if (error) throw error;
       setVideos((prev) => prev.filter((x) => x.id !== v.id));
     } catch (e) {
       setErrorMsg(`Falha ao apagar: ${e.message}`);
