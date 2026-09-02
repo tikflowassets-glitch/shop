@@ -84,10 +84,9 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState(null);
 
   const [selectedCaptions, setSelectedCaptions] = useState([]);
-  const [videoFile, setVideoFile] = useState(null);
+  const [videoFiles, setVideoFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
-  const [uploadPercent, setUploadPercent] = useState(0);
-  const [finalizing, setFinalizing] = useState(false);
+  const [uploadResults, setUploadResults] = useState([]); // [{name, status: 'pending'|'uploading'|'done'|'error', percent, error}]
   const [uploadDone, setUploadDone] = useState(false);
   const [successMsg, setSuccessMsg] = useState(null);
   // (geracao das variacoes agora roda via workflow do n8n, nao mais no navegador)
@@ -229,95 +228,120 @@ export default function App() {
     });
   }
 
-  async function handleSend() {
-    if (!videoFile || selectedCaptions.length === 0 || !PROCESSOR_URL) return;
-    setUploading(true);
-    setUploadPercent(0);
-    setFinalizing(false);
-    setErrorMsg(null);
-    try {
-      const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB por pedaço
-      const totalChunks = Math.ceil(videoFile.size / CHUNK_SIZE);
-      const uploadId = crypto.randomUUID().replace(/-/g, "");
+  async function uploadSingleVideo(file, onProgress) {
+    const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB por pedaço
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const uploadId = crypto.randomUUID().replace(/-/g, "");
 
-      async function uploadChunkWithRetry(chunkBlob, index, retries = 3) {
-        for (let attempt = 1; attempt <= retries; attempt++) {
-          try {
-            const chunkForm = new FormData();
-            chunkForm.append("upload_id", uploadId);
-            chunkForm.append("chunk_index", String(index));
-            chunkForm.append("chunk", chunkBlob);
-            const res = await fetch(`${PROCESSOR_URL}/upload-chunk`, { method: "POST", body: chunkForm });
-            if (!res.ok) throw new Error(`Falha no pedaço ${index} (${res.status})`);
-            return;
-          } catch (e) {
-            if (attempt === retries) throw e;
-            await new Promise((r) => setTimeout(r, 1500));
-          }
+    async function uploadChunkWithRetry(chunkBlob, index, retries = 3) {
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          const chunkForm = new FormData();
+          chunkForm.append("upload_id", uploadId);
+          chunkForm.append("chunk_index", String(index));
+          chunkForm.append("chunk", chunkBlob);
+          const res = await fetch(`${PROCESSOR_URL}/upload-chunk`, { method: "POST", body: chunkForm });
+          if (!res.ok) throw new Error(`Falha no pedaço ${index} (${res.status})`);
+          return;
+        } catch (e) {
+          if (attempt === retries) throw e;
+          await new Promise((r) => setTimeout(r, 1500));
         }
       }
-
-      let bytesSent = 0;
-      for (let i = 0; i < totalChunks; i++) {
-        const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, videoFile.size);
-        const chunkBlob = videoFile.slice(start, end);
-        await uploadChunkWithRetry(chunkBlob, i);
-        bytesSent += chunkBlob.size;
-        setUploadPercent(Math.round((bytesSent / videoFile.size) * 100));
-      }
-
-      setFinalizing(true);
-      const timeoutController = new AbortController();
-      const timeoutId = setTimeout(() => timeoutController.abort(), 4 * 60 * 1000); // 4 min
-      let completeRes;
-      try {
-        completeRes = await fetch(`${PROCESSOR_URL}/upload-complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ upload_id: uploadId, total_chunks: totalChunks }),
-          signal: timeoutController.signal,
-        });
-      } catch (e) {
-        if (e.name === "AbortError") {
-          throw new Error("O servidor demorou demais para responder (mais de 4 min). O vídeo pode ainda ter sido processado com sucesso do lado do servidor — confira na aba Vídeos antes de tentar de novo.");
-        }
-        throw e;
-      } finally {
-        clearTimeout(timeoutId);
-      }
-      if (!completeRes.ok) throw new Error(`Falha ao finalizar envio (${completeRes.status})`);
-      const uploadData = await completeRes.json();
-
-      const { error: insertError } = await supabase.from("shop_videos").insert({
-        kind: "raw",
-        storage_path: uploadData.storage_path,
-        duration: uploadData.duration,
-        width: uploadData.width,
-        height: uploadData.height,
-        fps: uploadData.fps,
-        thumbnail_path: uploadData.thumbnail_path,
-        original_filename: videoFile.name,
-        caption_ids: selectedCaptions,
-        status: "pending",
-        uploaded_by: "sergio",
-        max_uses: 4,
-      });
-      if (insertError) throw insertError;
-
-      setUploadDone(true);
-      setSuccessMsg(`Vídeo "${videoFile.name}" enviado.`);
-      setVideoFile(null);
-      setSelectedCaptions([]);
-      loadData();
-      setTimeout(() => setUploadDone(false), 1800);
-    } catch (e) {
-      setErrorMsg(e.message);
-      setProcessingProgress(null);
-    } finally {
-      setUploading(false);
-      setFinalizing(false);
     }
+
+    let bytesSent = 0;
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunkBlob = file.slice(start, end);
+      await uploadChunkWithRetry(chunkBlob, i);
+      bytesSent += chunkBlob.size;
+      onProgress(Math.round((bytesSent / file.size) * 100));
+    }
+
+    onProgress("finalizing");
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => timeoutController.abort(), 4 * 60 * 1000); // 4 min
+    let completeRes;
+    try {
+      completeRes = await fetch(`${PROCESSOR_URL}/upload-complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ upload_id: uploadId, total_chunks: totalChunks }),
+        signal: timeoutController.signal,
+      });
+    } catch (e) {
+      if (e.name === "AbortError") {
+        throw new Error("O servidor demorou demais para responder (mais de 4 min). O vídeo pode ainda ter sido processado com sucesso do lado do servidor — confira na aba Vídeos antes de tentar de novo.");
+      }
+      throw e;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+    if (!completeRes.ok) throw new Error(`Falha ao finalizar envio (${completeRes.status})`);
+    return completeRes.json();
+  }
+
+  async function handleSend() {
+    if (videoFiles.length === 0 || !PROCESSOR_URL) return;
+    setUploading(true);
+    setErrorMsg(null);
+    const results = videoFiles.map((f) => ({ name: f.name, status: "pending", percent: 0 }));
+    setUploadResults(results);
+
+    let successCount = 0;
+    for (let idx = 0; idx < videoFiles.length; idx++) {
+      const file = videoFiles[idx];
+      try {
+        results[idx].status = "uploading";
+        setUploadResults([...results]);
+
+        const uploadData = await uploadSingleVideo(file, (p) => {
+          results[idx].percent = p === "finalizing" ? 100 : p;
+          results[idx].status = p === "finalizing" ? "finalizing" : "uploading";
+          setUploadResults([...results]);
+        });
+
+        const { error: insertError } = await supabase.from("shop_videos").insert({
+          kind: "raw",
+          storage_path: uploadData.storage_path,
+          duration: uploadData.duration,
+          width: uploadData.width,
+          height: uploadData.height,
+          fps: uploadData.fps,
+          thumbnail_path: uploadData.thumbnail_path,
+          original_filename: file.name,
+          caption_ids: selectedCaptions,
+          status: "pending",
+          uploaded_by: "sergio",
+          max_uses: 4,
+        });
+        if (insertError) throw insertError;
+
+        results[idx].status = "done";
+        successCount++;
+      } catch (e) {
+        results[idx].status = "error";
+        results[idx].error = e.message;
+      }
+      setUploadResults([...results]);
+    }
+
+    setUploading(false);
+    if (successCount === videoFiles.length) {
+      setUploadDone(true);
+      setSuccessMsg(successCount === 1 ? `Vídeo "${videoFiles[0].name}" enviado.` : `${successCount} vídeos enviados.`);
+      setVideoFiles([]);
+      setSelectedCaptions([]);
+      setUploadResults([]);
+      setTimeout(() => setUploadDone(false), 1800);
+    } else if (successCount > 0) {
+      setErrorMsg(`${successCount} de ${videoFiles.length} vídeos enviados. Confira os que falharam abaixo.`);
+    } else {
+      setErrorMsg("Nenhum vídeo foi enviado. Confira os erros abaixo.");
+    }
+    loadData();
   }
 
   function openNewCaption() {
@@ -487,25 +511,50 @@ export default function App() {
                 <h2 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 3px" }}>Enviar vídeo</h2>
                 <p style={{ fontSize: 12.5, color: C.sub, margin: "0 0 18px" }}>Cada vídeo bruto gera 4 variações automaticamente.</p>
 
-                <input type="file" accept="video/*" onChange={(e) => setVideoFile(e.target.files?.[0] || null)} style={{ display: "none" }} id="fileInput" />
+                <input
+                  type="file"
+                  accept="video/*"
+                  multiple
+                  onChange={(e) => setVideoFiles((prev) => [...prev, ...Array.from(e.target.files || [])])}
+                  style={{ display: "none" }}
+                  id="fileInput"
+                />
                 <label
                   htmlFor="fileInput"
                   style={{
                     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                     gap: 6, padding: "24px 16px", borderRadius: 12,
-                    border: videoFile ? `1.5px solid ${C.accent}` : `1.5px dashed ${C.border}`,
-                    background: videoFile ? C.accentSoft : "transparent", cursor: "pointer", marginBottom: 18,
+                    border: videoFiles.length > 0 ? `1.5px solid ${C.accent}` : `1.5px dashed ${C.border}`,
+                    background: videoFiles.length > 0 ? C.accentSoft : "transparent", cursor: "pointer", marginBottom: 10,
                   }}
                 >
-                  <Upload size={19} color={videoFile ? C.accentText : "#b5b1a6"} />
-                  <span style={{ fontSize: 12.5, fontWeight: 500, color: videoFile ? C.accentText : C.sub, textAlign: "center", wordBreak: "break-all" }}>
-                    {videoFile ? videoFile.name : "Toque para escolher o vídeo"}
+                  <Upload size={19} color={videoFiles.length > 0 ? C.accentText : "#b5b1a6"} />
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: videoFiles.length > 0 ? C.accentText : C.sub, textAlign: "center" }}>
+                    {videoFiles.length > 0 ? `${videoFiles.length} vídeo${videoFiles.length > 1 ? "s" : ""} escolhido${videoFiles.length > 1 ? "s" : ""}` : "Toque para escolher um ou mais vídeos"}
                   </span>
                 </label>
+
+                {videoFiles.length > 0 && !uploading && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 18 }}>
+                    {videoFiles.map((f, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: C.card, border: `1px solid ${C.border}` }}>
+                        <span style={{ flex: 1, fontSize: 11.5, color: C.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
+                        <button
+                          onClick={() => setVideoFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                          style={{ background: "none", border: "none", cursor: "pointer", padding: 2, display: "flex" }}
+                        >
+                          <X size={12} color={C.sub} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {videoFiles.length === 0 && <div style={{ marginBottom: 18 }} />}
 
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 600 }}>Legendas ({selectedCaptions.length}/4)</span>
                 </div>
+                <p style={{ fontSize: 11, color: C.sub, margin: "0 0 8px" }}>Opcional — sem legenda selecionada, as variações saem sem legenda. Se selecionar menos de 4, o restante também fica sem legenda (sem repetir).</p>
                 <div style={{ position: "relative", marginBottom: 10 }}>
                   <Search size={13} color={C.sub} style={{ position: "absolute", left: 10, top: 10 }} />
                   <input
@@ -546,32 +595,37 @@ export default function App() {
                 </div>
 
                 {uploading && (
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: C.accentText }}>
-                        {finalizing ? "Finalizando no servidor (juntando os pedaços)..." : `Enviando vídeo... ${uploadPercent}%`}
-                      </span>
-                    </div>
-                    <div style={{ width: "100%", height: 6, borderRadius: 10, background: C.border, overflow: "hidden" }}>
-                      <div style={{
-                        width: `${uploadPercent}%`,
-                        height: "100%", background: C.accent, borderRadius: 10, transition: "width 0.2s ease",
-                      }} />
-                    </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                    {uploadResults.map((r, i) => (
+                      <div key={i}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                          <span style={{ fontSize: 11.5, color: r.status === "error" ? "#a3766b" : C.accentText, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" }}>{r.name}</span>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, color: r.status === "error" ? "#a3766b" : C.accentText }}>
+                            {r.status === "error" ? "Falhou" : r.status === "done" ? "Pronto" : r.status === "finalizing" ? "Finalizando..." : r.status === "uploading" ? `${r.percent}%` : "Aguardando"}
+                          </span>
+                        </div>
+                        <div style={{ width: "100%", height: 5, borderRadius: 10, background: C.border, overflow: "hidden" }}>
+                          <div style={{
+                            width: `${r.status === "done" ? 100 : r.status === "error" ? 100 : r.percent}%`,
+                            height: "100%", background: r.status === "error" ? "#c99b8f" : C.accent, borderRadius: 10, transition: "width 0.2s ease",
+                          }} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
                 <button
                   onClick={handleSend}
-                  disabled={!videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL}
+                  disabled={videoFiles.length === 0 || uploading || !PROCESSOR_URL}
                   style={{
                     width: "100%", padding: "12px", borderRadius: 10, border: "none",
-                    background: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
-                    color: !videoFile || selectedCaptions.length === 0 || uploading || !PROCESSOR_URL ? "#a8a498" : "#fff",
-                    fontSize: 13, fontWeight: 600, cursor: !videoFile || selectedCaptions.length === 0 || uploading ? "not-allowed" : "pointer",
+                    background: videoFiles.length === 0 || uploading || !PROCESSOR_URL ? "#e7e4dd" : C.accent,
+                    color: videoFiles.length === 0 || uploading || !PROCESSOR_URL ? "#a8a498" : "#fff",
+                    fontSize: 13, fontWeight: 600, cursor: videoFiles.length === 0 || uploading ? "not-allowed" : "pointer",
                   }}
                 >
-                  {finalizing ? "Finalizando..." : uploading ? `Enviando... ${uploadPercent}%` : uploadDone ? "Enviado!" : "Enviar vídeo"}
+                  {uploading ? "Enviando..." : uploadDone ? "Enviado!" : videoFiles.length > 1 ? `Enviar ${videoFiles.length} vídeos` : "Enviar vídeo"}
                 </button>
               </div>
             )}
