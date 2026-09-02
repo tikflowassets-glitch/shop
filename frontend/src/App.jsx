@@ -220,10 +220,15 @@ export default function App() {
     return captions.filter((c) => c.caption_text.toLowerCase().includes(captionSearch.toLowerCase()));
   }, [captions, captionSearch]);
 
+  // cada video sorteia ate 4 legendas do total marcado (uma por variacao,
+  // sem repetir) - com mais videos no lote, marcar mais legendas da mais
+  // variedade entre eles (cada um sorteia um subconjunto diferente)
+  const captionCap = Math.max(4, videoFiles.length * 4);
+
   function toggleCaption(id) {
     setSelectedCaptions((prev) => {
       if (prev.includes(id)) return prev.filter((c) => c !== id);
-      if (prev.length >= 4) return prev;
+      if (prev.length >= captionCap) return prev;
       return [...prev, id];
     });
   }
@@ -552,7 +557,7 @@ export default function App() {
                 {videoFiles.length === 0 && <div style={{ marginBottom: 18 }} />}
 
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Legendas ({selectedCaptions.length}/4)</span>
+                  <span style={{ fontSize: 12.5, fontWeight: 600 }}>Legendas ({selectedCaptions.length}/{captionCap})</span>
                 </div>
                 <p style={{ fontSize: 11, color: C.sub, margin: "0 0 8px" }}>Opcional — sem legenda selecionada, as variações saem sem legenda. Se selecionar menos de 4, o restante também fica sem legenda (sem repetir).</p>
                 <div style={{ position: "relative", marginBottom: 10 }}>
@@ -569,7 +574,7 @@ export default function App() {
                   {filteredCaptions.length === 0 && <p style={{ fontSize: 12, color: C.sub }}>Nenhuma legenda cadastrada ainda.</p>}
                   {filteredCaptions.map((c) => {
                     const active = selectedCaptions.includes(c.id);
-                    const disabled = !active && selectedCaptions.length >= 4;
+                    const disabled = !active && selectedCaptions.length >= captionCap;
                     return (
                       <button
                         key={c.id}
