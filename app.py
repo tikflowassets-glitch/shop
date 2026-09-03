@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import re
 import shutil
 import subprocess
@@ -179,6 +180,7 @@ def build_reorder(n, mode, num_blocks):
         blocks_n = max(2, num_blocks)
         block_size = max(1, n // blocks_n)
         blocks = [list(range(i, min(i + block_size, n))) for i in range(0, n, block_size)]
+        random.shuffle(blocks)
         order = []
         max_len = max(len(b) for b in blocks)
         for i in range(max_len):
